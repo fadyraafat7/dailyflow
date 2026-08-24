@@ -1,0 +1,55 @@
+{
+  "kind": "collectionType",
+  "collectionName": "tasks",
+  "info": {
+    "singularName": "task",
+    "pluralName": "tasks",
+    "displayName": "Task"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string"
+    },
+    "plannedDate": {
+      "type": "date"
+    },
+    "priority": {
+      "type": "enumeration",
+      "enum": [
+        "low",
+        "high"
+      ]
+    },
+    "state": {
+      "type": "enumeration",
+      "enum": [
+        "pending",
+        "active",
+        "paused",
+        "completed"
+      ]
+    },
+    "project": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::project.project",
+      "inversedBy": "tasks"
+    },
+    "time_entries": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::time-entry.time-entry",
+      "mappedBy": "task"
+    },
+    "users_permissions_user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user",
+      "inversedBy": "tasks"
+    }
+  }
+}

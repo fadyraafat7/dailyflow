@@ -1,0 +1,30 @@
+{
+  "kind": "collectionType",
+  "collectionName": "time_entries",
+  "info": {
+    "singularName": "time-entry",
+    "pluralName": "time-entries",
+    "displayName": "Time Entry"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "startedAt": {
+      "type": "datetime"
+    },
+    "stoppedAt": {
+      "type": "datetime"
+    },
+    "duration": {
+      "type": "integer"
+    },
+    "task": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::task.task",
+      "inversedBy": "time_entries"
+    }
+  }
+}
