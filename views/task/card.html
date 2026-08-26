@@ -1,0 +1,16 @@
+<article class="task-card" data-id="{{id}}" data-title="{{title}}" data-priority="{{priority}}" data-state="{{state}}">
+  <div>
+    <h4 class="task-card__title">{{title}}</h4>
+    <div class="task-card__meta">
+      <span class="badge priority--{{priority}}">{{priority}}</span>
+      <span class="badge state--{{state}}">{{state}}</span>
+      {{date}}
+    </div>
+    {{timeSummary}}
+  </div>
+  <div class="task-card__actions">
+    <button type="button" class="btn-icon" data-action="add-time-entry" title="Track time">⏱</button>
+    <button type="button" class="btn-icon" data-action="edit-task" title="Edit">✎</button>
+    <button type="button" class="btn-icon btn-delete" data-action="delete-task" title="Delete">🗑</button>
+  </div>
+</article>
