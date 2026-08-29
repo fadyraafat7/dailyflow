@@ -1,4 +1,6 @@
-<article class="project-card" data-id="{{id}}" data-name="{{name}}" data-state="{{state}}">
+<article class="project-card project-card--clickable" data-id="{{id}}" data-name="{{name}}" data-count="{{count}}"
+  @click="selected = { id: $el.dataset.id, name: $el.dataset.name, count: Number($el.dataset.count) }"
+  hx-get="/api/tasks?filters[project][documentId][$eq]={{id}}" hx-target="#tasks" hx-swap="innerHTML">
   <header class="project-card__head">
     <h3 class="project-card__name">{{name}}</h3>
     <span class="badge state--{{state}}">{{state}}</span>

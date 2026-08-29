@@ -1,4 +1,4 @@
-<article class="task-card" data-id="{{id}}" data-title="{{title}}" data-priority="{{priority}}" data-state="{{state}}">
+<article class="task-card" id="task-{{id}}" data-id="{{id}}" data-title="{{title}}" data-priority="{{priority}}" data-state="{{state}}">
   <div>
     <h4 class="task-card__title">{{title}}</h4>
     <div class="task-card__meta">
@@ -9,8 +9,12 @@
     {{timeSummary}}
   </div>
   <div class="task-card__actions">
-    <button type="button" class="btn-icon" data-action="add-time-entry" title="Track time">⏱</button>
-    <button type="button" class="btn-icon" data-action="edit-task" title="Edit">✎</button>
-    <button type="button" class="btn-icon btn-delete" data-action="delete-task" title="Delete">🗑</button>
+    <button type="button" class="btn-icon" title="Track time"
+      @click="$dispatch('open-time-entry', { id: $el.closest('.task-card').dataset.id, title: $el.closest('.task-card').dataset.title })">⏱</button>
+    <button type="button" class="btn-icon" title="Edit"
+      @click="$dispatch('open-edit', { id: $el.closest('.task-card').dataset.id, title: $el.closest('.task-card').dataset.title, priority: $el.closest('.task-card').dataset.priority, state: $el.closest('.task-card').dataset.state })">✎</button>
+    <button type="button" class="btn-icon btn-delete" title="Delete"
+      hx-delete="/api/tasks/{{id}}" hx-target="closest .task-card" hx-swap="outerHTML"
+      hx-confirm="Are you sure?">🗑</button>
   </div>
 </article>
