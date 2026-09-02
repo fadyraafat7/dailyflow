@@ -1,10 +1,12 @@
-<article class="project-card project-card--clickable" data-id="{{id}}" data-name="{{name}}" data-count="{{count}}"
+<article class="project-card project-card--clickable" data-id="{{id}}" data-name="{{name}}" data-count="{{count}}" data-state="{{state}}" data-description="{{descriptionText}}"
   @click="selected = { id: $el.dataset.id, name: $el.dataset.name, count: Number($el.dataset.count) }"
   hx-get="/api/tasks?filters[project][documentId][$eq]={{id}}" hx-target="#tasks" hx-swap="innerHTML">
   <header class="project-card__head">
     <h3 class="project-card__name">{{name}}</h3>
     <span class="badge state--{{state}}">{{state}}</span>
     <span class="badge badge--count">{{count}} {{taskLabel}}</span>
+    <button type="button" class="btn-icon" title="Edit project" @click.stop="$dispatch('open-project-edit', { id: $el.closest('.project-card').dataset.id, name: $el.closest('.project-card').dataset.name, description: $el.closest('.project-card').dataset.description || '', state: $el.closest('.project-card').dataset.state })">✎</button>
+    <button type="button" class="btn-icon btn-delete" title="Delete project" hx-delete="/api/projects/{{id}}" hx-target="#projects" hx-swap="innerHTML" hx-confirm="Are you sure you want to delete this project?" @click.stop>🗑</button>
   </header>
   {{description}}
 </article>
