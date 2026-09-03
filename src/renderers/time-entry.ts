@@ -8,10 +8,12 @@ export function renderTimeEntryCard(timeEntry: any): string {
   const status = timeEntry.stoppedAt ? "completed" : "running";
 
   return renderView("time-entry/card", {
-    id,
-    startedAt,
-    stoppedAt,
-    duration: esc(duration),
+    timeEntry: {
+      id: timeEntry.documentId,
+      startedAt: timeEntry.startedAt,
+      stoppedAt: timeEntry.stoppedAt,
+      duration: timeEntry.duration,
+    },
     status,
     stoppedAtHtml: stoppedAt
       ? `<time datetime="${stoppedAt}">${stoppedAt}</time>`

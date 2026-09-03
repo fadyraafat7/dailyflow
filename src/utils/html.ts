@@ -17,15 +17,17 @@ export function isHtmx(ctx: any): boolean {
 /** Render a view file using values that have already been escaped for HTML. */
 export function renderView(
   viewName: string,
-  values: Record<string, string | number> = {},
+  values: Record<string, unknown> = {},
 ): string {
-  const fs = require("node:fs");
   const path = require("node:path");
-  const filePath = path.join(process.cwd(), "views", `${viewName}.html`);
-  const template = fs.readFileSync(filePath, "utf8") as string;
+  const ejs = require("ejs") as {
+    renderFile: (
+      filePath: string,
+      data: Record<string, unknown>,
+      options?: Record<string, unknown>,
+    ) => string;
+  };
+  const filePath = path.join(process.cwd(), "views", `${viewName}.ejs`);
 
-  return template.replace(
-    /\{\{\s*([\w-]+)\s*\}\}/g,
-    (_match: string, key: string) => String(values[key] ?? ""),
-  );
+  return ejs.renderFile(filePath, values, { async: false });
 }
