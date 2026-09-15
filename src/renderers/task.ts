@@ -43,10 +43,13 @@ export function renderTaskCard(task: any): string {
   const timeSummary = `<div class="task-card__time">${timeEntries.length ? `<div class="task-card__total">Duration: <strong>${formatDuration(totalMinutes)}</strong></div>` : '<span class="task-card__no-time">No time entries</span>'}</div>`;
 
   return renderView("task/card", {
-    id,
-    title: esc(task.title),
-    priority: esc(task.priority),
-    state: esc(task.state),
+    task: {
+      id: task.documentId,
+      title: task.title,
+      priority: task.priority,
+      state: task.state,
+      plannedDate: task.plannedDate,
+    },
     date,
     timeSummary,
   }).trim();
