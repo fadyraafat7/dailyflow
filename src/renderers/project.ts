@@ -9,14 +9,13 @@ export function renderProjectCard(project: any): string {
     : "";
 
   return renderView("project/card", {
-    project: {
-      id: project.documentId,
-      name: project.name,
-      state: project.state,
-      description: project.description,
-    },
+    id,
+    name: esc(project.name),
+    state: esc(project.state),
     count,
     taskLabel: count === 1 ? "task" : "tasks",
+    description,
+    descriptionText,
   }).trim();
 }
 

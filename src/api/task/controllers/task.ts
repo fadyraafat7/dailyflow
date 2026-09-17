@@ -6,9 +6,20 @@
  */
 
 import { factories } from '@strapi/strapi';
-import { isHtmx, esc } from '../../../utils/html';
+import { isHtmx, esc, renderPaginationNav } from '../../../utils/html';
 import { renderTaskCard, renderTaskCards } from '../../../renderers/task';
-import { renderProjectCards } from '../../../renderers/project';
+import {
+  getRoleType,
+  getUserId,
+  mergeFilters,
+  canAccessProject,
+  canManageProject,
+  ROLE_OWNER,
+  ROLE_TEAM_LEAD,
+} from '../../../utils/access';
+
+/** Tasks per page when a request doesn't specify its own pagination. */
+const DEFAULT_PAGE_SIZE = 5;
 
 /** Accept flat form fields or JSON; drop empty strings. */
 function toData(body: any) {
@@ -22,6 +33,37 @@ function prettifySlug(slug: string): string {
     .replace(/[-_]+/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase())
     .trim();
+}
+
+/** Plain-text marker the frontend looks for in a rejected response's body
+ * to tell "duplicate title" apart from any other error. */
+const DUPLICATE_TITLE_MARKER = 'dailyflow:duplicate-task-title';
+
+/**
+ * Is there already a task with this title? Scoped to the same project
+ * (two different projects can reasonably both have a "Setup CI" task),
+ * or among project-less tasks when no project is given. Case/whitespace
+ * insensitive so "Fix login" and "fix login " count as the same title.
+ * A true match blocks creation — the caller is expected to reject the
+ * request rather than create a second task with the same title.
+ */
+async function findDuplicateTask(
+  strapi: any,
+  title: string,
+  projectDocId: string | null,
+  excludeDocumentId?: string,
+): Promise<boolean> {
+  const trimmed = (title || '').trim();
+  if (!trimmed) return false;
+
+  const filters: any = {
+    title: { $eqi: trimmed },
+    project: projectDocId ? { documentId: projectDocId } : { $null: true },
+  };
+  if (excludeDocumentId) filters.documentId = { $ne: excludeDocumentId };
+
+  const matches = await strapi.documents('api::task.task').findMany({ filters, limit: 1 });
+  return matches.length > 0;
 }
 
 function parseUrlInfo(url: string) {
@@ -46,16 +88,48 @@ function parseUrlInfo(url: string) {
   return { projectName, taskName };
 }
 
+/** documentId of the project a task belongs to (or null for a project-less task). */
+async function getTaskProjectDocId(strapi: any, taskDocId: string): Promise<string | null> {
+  const task = await strapi.documents('api::task.task').findOne({
+    documentId: taskDocId,
+    populate: { project: true },
+  });
+  return (task as any)?.project?.documentId ?? null;
+}
+
 export default factories.createCoreController('api::task.task', ({ strapi }) => ({
   async find(ctx) {
-    ctx.query = { ...ctx.query, populate: { ...(ctx.query.populate as object), time_entries: true } };
+    const role = getRoleType(ctx);
+    const userId = getUserId(ctx);
+    if (role === ROLE_TEAM_LEAD && userId) mergeFilters(ctx, { project: { users_permissions_user: userId } });
+    if (role === 'employee' && userId) mergeFilters(ctx, { project: { team_members: userId } });
+
+    const incomingPagination = (ctx.query.pagination as object) || {};
+    ctx.query = {
+      ...ctx.query,
+      populate: { ...(ctx.query.populate as object), time_entries: true },
+      pagination: { pageSize: DEFAULT_PAGE_SIZE, page: 1, ...incomingPagination },
+    };
     const res = await super.find(ctx);
     if (!isHtmx(ctx)) return res;
     ctx.type = 'html';
-    ctx.body = renderTaskCards(res.data ?? []);
+
+    let html = renderTaskCards(res.data ?? []);
+
+    const meta = (res as any).meta?.pagination;
+    if (meta) {
+      html += renderPaginationNav(meta, 'goToTasksPage');
+    }
+
+    ctx.body = html;
   },
 
   async findOne(ctx) {
+    const role = getRoleType(ctx);
+    const userId = getUserId(ctx);
+    if (role === ROLE_TEAM_LEAD && userId) mergeFilters(ctx, { project: { users_permissions_user: userId } });
+    if (role === 'employee' && userId) mergeFilters(ctx, { project: { team_members: userId } });
+
     ctx.query = { ...ctx.query, populate: { ...(ctx.query.populate as object), time_entries: true } };
     const res = await super.findOne(ctx);
     if (!isHtmx(ctx)) return res;
@@ -64,7 +138,36 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
   },
 
   async create(ctx) {
-    ctx.request.body = { data: toData(ctx.request.body) };
+    const data = toData(ctx.request.body);
+    ctx.request.body = { data };
+
+    const projectDocId = typeof data.project === 'string' ? data.project : null;
+
+    // Every task must belong to a project the caller is authorized for:
+    // Team Leads only their own project, Employees only a project
+    // they've been assigned to. A task with no project at all is only
+    // allowed for Owner/Team Lead (matches the "Employees work within
+    // assigned projects" model).
+    if (projectDocId) {
+      if (!(await canAccessProject(strapi, ctx, projectDocId))) {
+        return ctx.forbidden('You do not have access to this project.');
+      }
+    } else {
+      const role = getRoleType(ctx);
+      if (role !== ROLE_OWNER && role !== ROLE_TEAM_LEAD) {
+        return ctx.forbidden('Tasks must belong to a project you have access to.');
+      }
+    }
+
+    const isDuplicate = await findDuplicateTask(strapi, data.title, projectDocId);
+    if (isDuplicate) {
+      if (!isHtmx(ctx)) return ctx.badRequest('A task with this title already exists in this project.');
+      ctx.status = 400;
+      ctx.type = 'html';
+      ctx.body = DUPLICATE_TITLE_MARKER;
+      return;
+    }
+
     const res = await super.create(ctx);
     if (!isHtmx(ctx)) return res;
     const task = await strapi.documents('api::task.task').findOne({ documentId: res.data.documentId, populate: { time_entries: true } });
@@ -73,6 +176,12 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
   },
 
   async update(ctx) {
+    const { id } = ctx.params;
+    const projectDocId = await getTaskProjectDocId(strapi, id);
+    if (!(await canAccessProject(strapi, ctx, projectDocId || ''))) {
+      return ctx.forbidden('You do not have access to this task.');
+    }
+
     ctx.request.body = { data: toData(ctx.request.body) };
     const res = await super.update(ctx);
     if (!isHtmx(ctx)) return res;
@@ -82,6 +191,15 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
   },
 
   async delete(ctx) {
+    const { id } = ctx.params;
+    // Deletion is Owner/Team Lead only at the role-permission level
+    // already (Employees never reach this action) — this scopes a Team
+    // Lead to deleting tasks only within their own projects.
+    const projectDocId = await getTaskProjectDocId(strapi, id);
+    if (!(await canManageProject(strapi, ctx, projectDocId || ''))) {
+      return ctx.forbidden('You do not have access to this task.');
+    }
+
     const res = await super.delete(ctx);
     if (!isHtmx(ctx)) return res;
     ctx.type = 'html';
@@ -89,6 +207,8 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
   },
 
   async fromUrl(ctx) {
+    const role = getRoleType(ctx);
+    const userId = getUserId(ctx);
     const body = ctx.request.body?.data ?? ctx.request.body ?? {};
     const url = body.url || '';
     const title = body.title || '';
@@ -120,38 +240,60 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
 
       if (existing.length > 0) {
         projectDocId = existing[0].documentId;
-      } else {
+      } else if (role === ROLE_OWNER || role === ROLE_TEAM_LEAD) {
+        // Only Owners/Team Leads can spin up a brand-new project this
+        // way — Employees don't create projects.
         const created = await strapi.documents('api::project.project').create({
-          data: { name: finalProjectName, state: 'active' },
+          data: { name: finalProjectName, state: 'active', users_permissions_user: userId },
           status: 'published',
         });
         projectDocId = created.documentId;
+      } else {
+        if (!isHtmx(ctx)) {
+          return ctx.forbidden(`No project named "${finalProjectName}" is available to you — ask your Team Lead to create it and add you to it.`);
+        }
+        ctx.status = 403;
+        ctx.type = 'html';
+        ctx.body = `No project named "${esc(finalProjectName)}" is available to you — ask your Team Lead to create it and add you to it.`;
+        return;
       }
     }
 
-    // 3) Create the task
+    // 2b) Whether the project already existed or was just resolved, the
+    // caller still needs access to it.
+    if (projectDocId && !(await canAccessProject(strapi, ctx, projectDocId))) {
+      return ctx.forbidden('You do not have access to this project.');
+    }
+
+    // 3) Reject (don't create) if a task with this title already exists
+    // in the same project — the frontend surfaces this as an error toast
+    // and leaves the form open so the user can pick a different title.
+    const isDuplicate = await findDuplicateTask(strapi, finalTitle, projectDocId);
+    if (isDuplicate) {
+      if (!isHtmx(ctx)) return ctx.badRequest('A task with this title already exists in this project.');
+      ctx.status = 400;
+      ctx.type = 'html';
+      ctx.body = DUPLICATE_TITLE_MARKER;
+      return;
+    }
+
+    // 4) Create the task
     const taskData: any = { title: finalTitle, priority, state };
     if (projectDocId) taskData.project = projectDocId;
 
     const task = await strapi.documents('api::task.task').create({
-      data: taskData,
-      status: 'published',
-      populate: { time_entries: true },
+      data: taskData, status: 'published', populate: { time_entries: true },
     });
 
     if (!isHtmx(ctx)) {
       return { data: task, projectCreated: !projectDocId ? false : true };
     }
 
+    // The frontend submits this with hx-swap="none" and reloads both lists
+    // itself (refresh-tasks / refresh-projects) so the active search/filter
+    // stay in effect, instead of us pushing an unfiltered HTML fragment back.
     ctx.type = 'html';
-
-    let html = renderTaskCard(task);
-
-    // Refresh the projects list via oob swap
-    const projects = await strapi.documents('api::project.project').findMany({ populate: { tasks: true } });
-    html += `<div id="projects" hx-swap-oob="innerHTML:#projects">${renderProjectCards(projects)}</div>`;
-
-    ctx.body = html;
+    ctx.body = '';
   },
 
   async parseUrl(ctx) {

@@ -468,6 +468,10 @@ export interface ApiProjectProject extends Struct.CollectionTypeSchema {
     publishedAt: Schema.Attribute.DateTime;
     state: Schema.Attribute.Enumeration<['active', 'archived']>;
     tasks: Schema.Attribute.Relation<'oneToMany', 'api::task.task'>;
+    team_members: Schema.Attribute.Relation<
+      'manyToMany',
+      'plugin::users-permissions.user'
+    >;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1037,6 +1041,10 @@ export interface PluginUsersPermissionsUser
       'plugin::users-permissions.role'
     >;
     tasks: Schema.Attribute.Relation<'oneToMany', 'api::task.task'>;
+    team_projects: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::project.project'
+    >;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
