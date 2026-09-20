@@ -62,8 +62,11 @@ export default ({ strapi }: { strapi: any }) => ({
       populate: { role: true },
       orderBy: { username: 'asc' },
     });
+    const projectWhere = role === ROLE_TEAM_LEAD
+      ? { users_permissions_user: getUserId(ctx), publishedAt: { $ne: null } }
+      : { publishedAt: { $ne: null } };
     const projects = await strapi.db.query('api::project.project').findMany({
-      where: role === ROLE_TEAM_LEAD ? { users_permissions_user: getUserId(ctx) } : {},
+      where: projectWhere,
       select: ['id', 'name', 'state'],
       orderBy: { name: 'asc' },
     });

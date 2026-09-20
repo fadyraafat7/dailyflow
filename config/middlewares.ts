@@ -3,21 +3,22 @@ import type { Core } from '@strapi/strapi';
 const config: Core.Config.Middlewares = [
   'strapi::logger',
   'strapi::errors',
-  'strapi::security',
+  {
+    name: 'strapi::security',
+    config: {
+      contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+          'script-src': ["'self'", "'unsafe-eval'"],
+          'script-src-attr': ["'self'", "'unsafe-inline'"],
+        },
+      },
+    },
+  },
   {
     name: 'strapi::cors',
     config: {
-      // Origins of the separate frontend during development.
-      // Add your production frontend URL here before deploying.
-      origin: [
-        'http://localhost:5500',
-        'http://127.0.0.1:5500',
-        'http://localhost:5173',
-        'http://localhost:3000',
-        'http://localhost:8080',
-      ],
-      // Allow all request headers so HTMX's request headers
-      // (HX-Request, HX-Target, …) pass the CORS preflight.
+      origin: ['http://localhost:1337', 'http://127.0.0.1:1337'],
       headers: '*',
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     },
