@@ -9,11 +9,13 @@ import {
   getRoleType,
   getUserId,
   mergeFilters,
+  stripEmptyFilters,
   canManageProject,
   isProjectOwner,
   isProjectMember,
   getOwnedProjectIds,
   getMemberProjectIds,
+  getManagedEmployeeIds,
   ROLE_OWNER,
   ROLE_TEAM_LEAD,
   ROLE_EMPLOYEE,
@@ -72,6 +74,7 @@ function normalizeTeamMemberIds(raw: any): number[] {
 
 export default factories.createCoreController('api::project.project', ({ strapi }) => ({
   async find(ctx) {
+    if (ctx.query.filters) ctx.query.filters = stripEmptyFilters(ctx.query.filters);
     const role = getRoleType(ctx);
     const userId = getUserId(ctx);
     if (role === ROLE_TEAM_LEAD && userId) {
@@ -90,11 +93,11 @@ export default factories.createCoreController('api::project.project', ({ strapi 
     if (!isHtmx(ctx)) return res;
     ctx.type = 'html';
 
-    let html = renderProjectCards(res.data ?? []);
+    let html = renderProjectCards(res.data ?? [], role || '');
 
     const meta = (res as any).meta?.pagination;
     if (meta) {
-      html += renderPaginationNav(meta, 'goToProjectsPage');
+      html += renderPaginationNav(meta, '/api/projects', '#projects', '#project-filters');
     }
 
     ctx.body = html;
@@ -147,6 +150,23 @@ export default factories.createCoreController('api::project.project', ({ strapi 
       || Object.prototype.hasOwnProperty.call(rawBody, '_has_team_members');
     const rawTeamMembers = rawBody.team_members;
 
+    let memberIds: number[] = [];
+    if (hasTeamField) {
+      memberIds = normalizeTeamMemberIds(rawTeamMembers);
+      const employeeCount = await strapi.db.query('plugin::users-permissions.user').count({
+        where: { id: { $in: memberIds }, role: { type: ROLE_EMPLOYEE } },
+      });
+      if (employeeCount !== memberIds.length) {
+        return ctx.forbidden('Projects can only include Employees as team members.');
+      }
+      if (getRoleType(ctx) === ROLE_TEAM_LEAD) {
+        const managedIds = await getManagedEmployeeIds(strapi, getUserId(ctx) as number);
+        if (memberIds.some((memberId) => !managedIds.includes(memberId))) {
+          return ctx.forbidden('You can only assign Employees within your team scope.');
+        }
+      }
+    }
+
     const data = toData(ctx.request.body);
     delete data.team_members;
     delete data._has_team_members;
@@ -155,7 +175,6 @@ export default factories.createCoreController('api::project.project', ({ strapi 
     const res = await super.update(ctx);
 
     if (hasTeamField) {
-      const memberIds = normalizeTeamMemberIds(rawTeamMembers);
       await strapi.documents('api::project.project').update({
         documentId: id,
         data: { team_members: memberIds },
@@ -202,8 +221,14 @@ export default factories.createCoreController('api::project.project', ({ strapi 
     });
     const currentMemberIds = (row?.team_members || []).map((u: any) => u.id);
 
+    const employeeIds = getRoleType(ctx) === ROLE_TEAM_LEAD
+      ? await getManagedEmployeeIds(strapi, getUserId(ctx) as number)
+      : undefined;
     const employees = await strapi.db.query('plugin::users-permissions.user').findMany({
-      where: { role: { type: ROLE_EMPLOYEE } },
+      where: {
+        role: { type: ROLE_EMPLOYEE },
+        ...(employeeIds ? { id: { $in: employeeIds } } : {}),
+      },
       orderBy: { username: 'asc' },
     });
 

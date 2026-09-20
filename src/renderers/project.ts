@@ -45,7 +45,7 @@ export function renderProjectEditForm(
 </div>`;
 }
 
-export function renderProjectCard(project: any): string {
+export function renderProjectCard(project: any, role: string): string {
   const id = esc(project.documentId);
   const count = Array.isArray(project.tasks) ? project.tasks.length : 0;
   const descriptionText = project.description ? esc(project.description) : "";
@@ -61,11 +61,12 @@ export function renderProjectCard(project: any): string {
     taskLabel: count === 1 ? "task" : "tasks",
     description,
     descriptionText,
+    canManage: role === "owner" || role === "team_lead" ? "" : "hidden",
   }).trim();
 }
 
-export function renderProjectCards(projects: any[]): string {
+export function renderProjectCards(projects: any[], role = ""): string {
   return projects.length
-    ? projects.map(renderProjectCard).join("\n")
+    ? projects.map((project) => renderProjectCard(project, role)).join("\n")
     : renderView("project/empty").trim();
 }

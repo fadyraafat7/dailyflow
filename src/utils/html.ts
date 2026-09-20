@@ -53,22 +53,28 @@ export function buildQueryString(obj: Record<string, unknown>, prefix = ""): str
 }
 
 /**
- * Classic numbered pagination (1 2 3 … with prev/next). Shared by any
- * controller that paginates a list. `gotoFn` is the name of the frontend
- * (Alpine) method to call with the target page number — e.g.
- * "goToProjectsPage" or "goToTasksPage" — so the button itself carries no
- * URL: the frontend owns the fetch, the active filters, and keeping the
- * page's own URL in sync.
+ * Classic numbered pagination (1 2 3 … with prev/next). Each button is a
+ * self-contained HTMX request: it GETs `endpoint`, targets `target`,
+ * includes the filter form `includeForm` so current filters carry over,
+ * and injects the target page via hx-vals.
  */
-export function renderPaginationNav(meta: { page: number; pageCount: number }, gotoFn: string): string {
+export function renderPaginationNav(
+  meta: { page: number; pageCount: number },
+  endpoint: string,
+  target: string,
+  includeForm: string,
+): string {
   const { page, pageCount } = meta;
   if (pageCount <= 1) return "";
 
+  const attrs = (targetPage: number) =>
+    `hx-get="${endpoint}" hx-target="${target}" hx-swap="innerHTML" hx-include="${includeForm}" hx-vals='{"pagination[page]": ${targetPage}}'`;
+
   const navButton = (targetPage: number, label: string, disabled: boolean) =>
-    `<button type="button" class="pagination__nav" @click="${gotoFn}(${targetPage})" ${disabled ? "disabled" : ""}>${label}</button>`;
+    `<button type="button" class="pagination__nav" ${attrs(targetPage)} ${disabled ? "disabled" : ""}>${label}</button>`;
 
   const pageButton = (targetPage: number) =>
-    `<button type="button" class="pagination__page${targetPage === page ? " is-active" : ""}" @click="${gotoFn}(${targetPage})" ${targetPage === page ? "disabled" : ""}>${targetPage}</button>`;
+    `<button type="button" class="pagination__page${targetPage === page ? " is-active" : ""}" ${attrs(targetPage)} ${targetPage === page ? "disabled" : ""}>${targetPage}</button>`;
 
   // Always show first, last, current, and current's immediate neighbours;
   // collapse any gap between them into an ellipsis.

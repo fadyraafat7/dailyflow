@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DailyFlow</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="/app.css" />
+</head>
+<body x-data="{
+        selected: null,
+        editing: null,
+        addModalOpen: false,
+        timeEntryModalOpen: false,
+        timeEntryTask: null,
+        projectModalOpen: false,
+        projectForm: { name: '', description: '', state: 'active' },
+        toast: null,
+        newTaskProjectName: '',
+        _toastTimer: null,
+        authToken: localStorage.getItem('dailyflow_token'),
+        authUser: null,
+        perms: [],
+        accountModalOpen: false,
+        showToast(msg) {
+            this.toast = msg;
+            clearTimeout(this._toastTimer);
+            this._toastTimer = setTimeout(() => this.toast = null, 4500);
+        },
+        can(p) { return this.perms.includes(p); },
+        isManager() { const t = this.authUser?.role?.type; return t === 'owner' || t === 'team_lead'; },
+        logout() {
+            this.authToken = null;
+            this.authUser = null;
+            this.perms = [];
+            this.selected = null;
+            localStorage.removeItem('dailyflow_token');
+        },
+        closeProjectModal() {
+            this.projectModalOpen = false;
+            this.projectForm = { name: '', description: '', state: 'active' };
+        },
+        selectProject(el) {
+            this.selected = { id: el.dataset.id, name: el.dataset.name, count: Number(el.dataset.count) };
+            if (this.$refs.taskForm) this.$refs.taskForm.reset();
+            this.$nextTick(() => this.$dispatch('load-tasks'));
+        }
+    }"
+      :hx-headers="JSON.stringify(authToken ? { Authorization: 'Bearer ' + authToken } : {})"
+      @auth-login.window="authToken = $event.detail.jwt; authUser = $event.detail.user; perms = $event.detail.perms; localStorage.setItem('dailyflow_token', $event.detail.jwt); $dispatch('load-projects')"
+      @auth-session.window="authUser = $event.detail.user; perms = $event.detail.perms; $dispatch('load-projects')"
+      @auth-password-changed.window="authToken = $event.detail.jwt; localStorage.setItem('dailyflow_token', $event.detail.jwt); accountModalOpen = false; showToast('Password changed.')"
+      @open-edit="editing = $event.detail"
+      @open-time-entry="timeEntryTask = $event.detail; timeEntryModalOpen = true"
+      @refresh-tasks="if(selected) $dispatch('load-tasks')"
+      @refresh-projects="$dispatch('load-projects')"
+      @htmx:before-swap.window="if($event.detail.xhr.status===204){$event.detail.shouldSwap=true;$event.detail.isError=false}"
+      @htmx:after-settle.window="Alpine.initTree($event.detail.target)"
+      @htmx:response-error.window="(function(xhr){ if(!xhr) return; if(xhr.status===401||xhr.status===403){ if(this.authToken){ this.logout(); this.showToast('Session expired — please log in again.'); } } else { try{ var b=JSON.parse(xhr.responseText); var m=b&&b.error&&b.error.message; if(m){ this.showToast(m); } else { this.showToast('Request failed ('+xhr.status+').'); } }catch(e){ this.showToast('Request failed ('+xhr.status+').'); } } }).call(this, $event.detail.xhr)"
+      @htmx:send-error.window="showToast('Could not reach the server.')">
+
+    <!-- Session check on page load -->
+    <div x-show="false"
+         x-init="if(authToken) htmx.ajax('GET', '/api/auth-html/session', {target: document.body, swap: 'none', headers: {Authorization: 'Bearer ' + authToken}})">
+    </div>
+
+    <div>
+        <div class="toast" x-show="toast" x-cloak x-transition x-text="toast" @click="toast = null"></div>
+
+        <!-- Login screen -->
+        <div class="login-screen" x-show="!authUser && !authToken" x-cloak>
+            <form class="login-card"
+                  hx-post="/api/auth-html/login"
+                  hx-target="#login-error"
+                  hx-swap="innerHTML">
+                <div class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M4 12.5L9.5 18L20 6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <h1>DailyFlow</h1>
+                <p class="subtitle">Sign in to continue</p>
+                <div id="login-error"></div>
+                <input type="text" name="identifier" class="form-control" placeholder="Email or username" required autocomplete="username" />
+                <input type="password" name="password" class="form-control" placeholder="Password" required autocomplete="current-password" />
+                <button type="submit">Sign in</button>
+            </form>
+        </div>
+
+        <!-- Main app -->
+        <div x-show="authUser" x-cloak>
+            <header>
+                <div class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M4 12.5L9.5 18L20 6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1>DailyFlow</h1>
+                    <p class="subtitle">
+                        Strapi returns HTML · HTMX handles requests · Alpine handles UI state
+                    </p>
+                </div>
+                <div class="header-user">
+                    <span x-text="authUser?.username"></span>
+                    <span class="badge" x-show="authUser?.role?.name" x-text="authUser?.role?.name"></span>
+                    <button type="button" class="btn-ghost" x-show="isManager()"
+                        hx-get="/api/team/modal" hx-target="#modal-container" hx-swap="innerHTML">Team</button>
+                    <button type="button" class="btn-ghost" @click="accountModalOpen = true">Account</button>
+                    <button type="button" class="btn-ghost" @click="logout()">Log out</button>
+                </div>
+            </header>
+            <div class="layout">
+                <aside class="panel">
+                    <div class="section-head section-head--projects">
+                        <h2>Projects</h2>
+                        <button type="button" class="btn-icon" x-show="can('project.create')" @click="projectForm = { name: '', description: '', state: 'active' }; projectModalOpen = true" title="Add project">＋</button>
+                    </div>
+                    <form id="project-filters" class="project-toolbar"
+                          hx-get="/api/projects" hx-target="#projects" hx-swap="innerHTML"
+                          hx-trigger="load-projects from:body, input changed delay:400ms from:find input, change from:find select">
+                        <input type="search" name="filters[name][$containsi]" class="form-control project-toolbar__search" placeholder="Search projects…" />
+                        <select name="filters[state][$eq]" class="form-select">
+                            <option value="">All states</option>
+                            <option value="active">Active</option>
+                            <option value="archived">Archived</option>
+                        </select>
+                    </form>
+                    <div id="projects" class="project-list">
+                        Loading projects...
+                    </div>
+                </aside>
+                <main class="panel">
+                    <p x-show="!selected" class="empty placeholder">
+                        ← Select a project to see its tasks.
+                    </p>
+                    <div x-show="selected" x-cloak>
+                        <header class="detail__head">
+                            <div>
+                                <h2 class="detail__title" x-text="selected?.name"></h2>
+                                <span class="badge" x-text="(selected?.count || 0) + ' tasks'"></span>
+                            </div>
+                            <button type="button" class="btn-icon" @click="addModalOpen = true; newTaskProjectName = selected ? selected.name : ''" title="Add task">➕</button>
+                        </header>
+                        <form id="task-filters" x-ref="taskForm" class="task-toolbar"
+                              hx-get="/api/tasks" hx-target="#tasks" hx-swap="innerHTML"
+                              hx-trigger="load-tasks from:body, input changed delay:400ms from:find input, change from:find select">
+                            <input type="hidden" name="filters[project][documentId][$eq]" :value="selected?.id" />
+                            <input type="search" name="filters[title][$containsi]" class="form-control task-toolbar__search" placeholder="Search tasks…" />
+                            <select name="filters[priority][$eq]" class="form-select">
+                                <option value="">All priorities</option>
+                                <option value="low">Low priority</option>
+                                <option value="high">High priority</option>
+                            </select>
+                            <select name="filters[state][$eq]" class="form-select">
+                                <option value="">All states</option>
+                                <option value="pending">Pending</option>
+                                <option value="active">Active</option>
+                                <option value="paused">Paused</option>
+                                <option value="completed">Completed</option>
+                            </select>
+                            <select name="sort" class="form-select">
+                                <option value="createdAt:desc">Newest first</option>
+                                <option value="createdAt:asc">Oldest first</option>
+                                <option value="priority:desc">By priority</option>
+                                <option value="plannedDate:asc">By planned date</option>
+                            </select>
+                        </form>
+                        <div id="tasks" class="task-list"></div>
+                    </div>
+                </main>
+            </div>
+        </div>
+
+        <!-- New project modal -->
+        <template x-if="projectModalOpen">
+            <div class="modal" @click.self="closeProjectModal()">
+                <form class="task-edit"
+                      hx-post="/api/projects"
+                      hx-swap="none"
+                      x-init="htmx.process($el)"
+                      @htmx:after-request="closeProjectModal(); $el.reset(); $dispatch('refresh-projects')">
+                    <h3>New project</h3>
+                    <input type="text" name="name" class="form-control" placeholder="Project name" x-model="projectForm.name" required />
+                    <textarea name="description" class="form-control" rows="4" placeholder="Project description" x-model="projectForm.description"></textarea>
+                    <select name="state" class="form-select" x-model="projectForm.state">
+                        <option value="active">active</option>
+                        <option value="archived">archived</option>
+                    </select>
+                    <p class="form-hint">Save the project first, then reopen it to assign team members.</p>
+                    <div class="task-edit__actions">
+                        <button type="submit">Add</button>
+                        <button type="button" class="btn-ghost" @click="closeProjectModal()">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </template>
+
+        <!-- Account modal (change password via HTMX) -->
+        <template x-if="accountModalOpen">
+            <div class="modal" @click.self="accountModalOpen = false">
+                <form class="task-edit"
+                      hx-post="/api/auth-html/change-password"
+                      hx-target="#change-pw-feedback"
+                      hx-swap="innerHTML"
+                      x-init="htmx.process($el)">
+                    <h3>Change password</h3>
+                    <div id="change-pw-feedback"></div>
+                    <input type="password" name="currentPassword" class="form-control" placeholder="Current password" required autocomplete="current-password" />
+                    <input type="password" name="password" class="form-control" placeholder="New password" required minlength="6" autocomplete="new-password" />
+                    <div class="task-edit__actions">
+                        <button type="submit">Save</button>
+                        <button type="button" class="btn-ghost" @click="accountModalOpen = false">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </template>
+
+        <!-- Add task modal -->
+        <div x-show="addModalOpen" class="modal" @click.self="addModalOpen = false" style="display:none">
+            <form class="task-edit" hx-post="/api/tasks/from-url" hx-swap="none"
+                @htmx:after-request="if ($event.detail.elt === $el && $event.detail.successful) { addModalOpen = false; $el.reset(); newTaskProjectName = ''; $dispatch('refresh-tasks'); $dispatch('refresh-projects') }">
+                <h3>New task</h3>
+                <label class="url-import__label">Import from URL (optional)</label>
+                <input type="url" name="url" class="form-control"
+                       placeholder="https://example.com/projects/ecommerce/tasks/fix-login"
+                       hx-post="/api/tasks/parse-url"
+                       hx-trigger="input changed delay:400ms"
+                       hx-target="#url-preview"
+                       hx-swap="innerHTML" />
+                <div id="url-preview"></div>
+                <input id="field-projectName" type="text" name="projectName" class="form-control" placeholder="Project name..." x-model="newTaskProjectName" />
+                <input id="field-title" type="text" name="title" class="form-control" placeholder="Task title..." required />
+                <div class="task-edit__row">
+                    <select name="priority" class="form-select">
+                        <option value="low">low</option>
+                        <option value="high">high</option>
+                    </select>
+                    <select name="state" class="form-select">
+                        <option value="pending">pending</option>
+                        <option value="active">active</option>
+                        <option value="paused">paused</option>
+                        <option value="completed">completed</option>
+                    </select>
+                </div>
+                <div class="task-edit__actions">
+                    <button type="submit">Add</button>
+                    <button type="button" class="btn-ghost" @click="addModalOpen = false">Cancel</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Edit task modal -->
+        <template x-if="editing">
+            <div class="modal" @click.self="editing = null">
+                <form class="task-edit"
+                      :hx-put="'/api/tasks/' + editing.id"
+                      :hx-target="'#task-' + editing.id"
+                      hx-swap="outerHTML"
+                      x-init="htmx.process($el)"
+                      @htmx:after-request="editing = null">
+                    <h3>Edit task</h3>
+                    <input type="text" name="title" class="form-control" :value="editing.title" required />
+                    <div class="task-edit__row">
+                        <select name="priority" class="form-select" x-model="editing.priority">
+                            <option value="low">low</option>
+                            <option value="high">high</option>
+                        </select>
+                        <select name="state" class="form-select" x-model="editing.state">
+                            <option value="pending">pending</option>
+                            <option value="active">active</option>
+                            <option value="paused">paused</option>
+                            <option value="completed">completed</option>
+                        </select>
+                    </div>
+                    <input type="hidden" name="project" :value="selected?.id" />
+                    <div class="task-edit__actions">
+                        <button type="submit">Save</button>
+                        <button type="button" class="btn-ghost" @click="editing = null">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </template>
+
+        <!-- Time entry modal -->
+        <template x-if="timeEntryModalOpen">
+            <div class="modal" @click.self="timeEntryModalOpen = false; timeEntryTask = null">
+                <form class="task-edit" hx-post="/api/time-entries" hx-swap="none"
+                      x-init="htmx.process($el)"
+                      @htmx:after-request="timeEntryModalOpen = false; timeEntryTask = null; $el.reset(); $dispatch('refresh-tasks')">
+                    <h3>Track time — <span x-text="timeEntryTask?.title"></span></h3>
+                    <input type="datetime-local" name="startedAt" class="form-control" required />
+                    <input type="datetime-local" name="stoppedAt" class="form-control" required />
+                    <input type="hidden" name="task" :value="timeEntryTask?.id" />
+                    <div class="task-edit__actions">
+                        <button type="submit">Add</button>
+                        <button type="button" class="btn-ghost" @click="timeEntryModalOpen = false; timeEntryTask = null">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </template>
+
+        <div id="modal-container"></div>
+    </div>
+</body>
+</html>

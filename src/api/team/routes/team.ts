@@ -4,5 +4,6 @@ export default {
     { method: 'GET', path: '/team/members', handler: 'team.listMembers' },
     { method: 'POST', path: '/team/members', handler: 'team.createMember' },
     { method: 'POST', path: '/team/members/:id/reset-password', handler: 'team.resetPassword' },
+    { method: 'DELETE', path: '/team/members/:id', handler: 'team.deleteMember' },
   ],
 };

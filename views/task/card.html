@@ -13,9 +13,9 @@
     {{timerControls}}
     <button type="button" class="btn-icon" title="Track time"
       @click="$dispatch('open-time-entry', { id: $el.closest('.task-card').dataset.id, title: $el.closest('.task-card').dataset.title })">⏱</button>
-    <button type="button" class="btn-icon" title="Edit"
+    <button type="button" class="btn-icon" title="Edit" x-show="can('task.update')"
       @click="$dispatch('open-edit', { id: $el.closest('.task-card').dataset.id, title: $el.closest('.task-card').dataset.title, priority: $el.closest('.task-card').dataset.priority, state: $el.closest('.task-card').dataset.state })">✎</button>
-    <button type="button" class="btn-icon btn-delete" title="Delete"
+    <button type="button" class="btn-icon btn-delete" title="Delete" x-show="can('task.delete')"
       hx-delete="/api/tasks/{{id}}" hx-target="closest .task-card" hx-swap="outerHTML"
       hx-confirm="Are you sure?">🗑</button>
   </div>

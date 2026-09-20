@@ -30,7 +30,7 @@ function formatDuration(minutes: number): string {
   return `${hours}h ${remainingMinutes}m`;
 }
 
-export function renderTaskCard(task: any): string {
+export function renderTaskCard(task: any, role = ""): string {
   const id = esc(task.documentId);
   const plannedDateRaw = task.plannedDate ? esc(task.plannedDate) : "";
   const date = task.plannedDate
@@ -77,11 +77,43 @@ export function renderTaskCard(task: any): string {
     timeSummary,
     timerControls,
     addedBy,
+    canDelete: role === "owner" || role === "team_lead" ? "" : "hidden",
   }).trim();
 }
 
-export function renderTaskCards(tasks: any[]): string {
-  return tasks.length
-    ? tasks.map(renderTaskCard).join("\n")
-    : renderView("task/empty").trim();
+export function renderTaskCards(tasks: any[], role = "", sort = ""): string {
+  if (!tasks.length) return renderView("task/empty").trim();
+
+  if (sort !== "plannedDate:asc") {
+    return tasks.map((task) => renderTaskCard(task, role)).join("\n");
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+  const weekAhead = todayMs + 7 * 86400000;
+
+  const bucketFor = (raw: string | null): string => {
+    if (!raw) return "No date";
+    const d = new Date(raw);
+    d.setHours(0, 0, 0, 0);
+    const ms = d.getTime();
+    if (Number.isNaN(ms)) return "No date";
+    if (ms < todayMs) return "Overdue";
+    if (ms === todayMs) return "Today";
+    if (ms <= weekAhead) return "This week";
+    return "Later";
+  };
+
+  let lastBucket = "";
+  let html = "";
+  for (const task of tasks) {
+    const bucket = bucketFor(task.plannedDate ?? null);
+    if (bucket !== lastBucket) {
+      html += `<div class="task-group-heading">${esc(bucket)}</div>\n`;
+      lastBucket = bucket;
+    }
+    html += renderTaskCard(task, role) + "\n";
+  }
+  return html;
 }

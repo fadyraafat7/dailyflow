@@ -18,7 +18,15 @@
  */
 
 import { isHtmx } from '../../../utils/html';
-import { getRoleType, getUserId, isManagedEmployee, ROLE_OWNER, ROLE_TEAM_LEAD, ROLE_EMPLOYEE } from '../../../utils/access';
+import {
+  getRoleType,
+  getUserId,
+  getManagedEmployeeIds,
+  isManagedEmployee,
+  ROLE_OWNER,
+  ROLE_TEAM_LEAD,
+  ROLE_EMPLOYEE,
+} from '../../../utils/access';
 import { renderTeamMembersList, renderTeamModal } from '../../../renderers/team';
 
 function sanitize(user: any) {
@@ -43,15 +51,25 @@ export default ({ strapi }: { strapi: any }) => ({
       return ctx.forbidden('Only Owners and Team Leads can view the team.');
     }
 
-    const where = role === ROLE_TEAM_LEAD ? { role: { type: ROLE_EMPLOYEE } } : {};
+    const managedIds = role === ROLE_TEAM_LEAD
+      ? await getManagedEmployeeIds(strapi, getUserId(ctx) as number)
+      : undefined;
+    const where = role === ROLE_TEAM_LEAD
+      ? { id: { $in: managedIds }, role: { type: ROLE_EMPLOYEE } }
+      : { role: { type: { $in: [ROLE_TEAM_LEAD, ROLE_EMPLOYEE] } } };
     const users = await strapi.db.query('plugin::users-permissions.user').findMany({
       where,
       populate: { role: true },
       orderBy: { username: 'asc' },
     });
+    const projects = await strapi.db.query('api::project.project').findMany({
+      where: role === ROLE_TEAM_LEAD ? { users_permissions_user: getUserId(ctx) } : {},
+      select: ['id', 'name', 'state'],
+      orderBy: { name: 'asc' },
+    });
 
     ctx.type = 'html';
-    ctx.body = renderTeamModal(users.map(sanitize), role as string);
+    ctx.body = renderTeamModal(users.map(sanitize), role as string, projects);
   },
 
   /**
@@ -65,7 +83,12 @@ export default ({ strapi }: { strapi: any }) => ({
       return ctx.forbidden('Only Owners and Team Leads can view the team.');
     }
 
-    const where = role === ROLE_TEAM_LEAD ? { role: { type: ROLE_EMPLOYEE } } : {};
+    const managedIds = role === ROLE_TEAM_LEAD
+      ? await getManagedEmployeeIds(strapi, getUserId(ctx) as number)
+      : undefined;
+    const where = role === ROLE_TEAM_LEAD
+      ? { id: { $in: managedIds }, role: { type: ROLE_EMPLOYEE } }
+      : { role: { type: { $in: [ROLE_TEAM_LEAD, ROLE_EMPLOYEE] } } };
     const users = await strapi.db.query('plugin::users-permissions.user').findMany({
       where,
       populate: { role: true },
@@ -80,11 +103,11 @@ export default ({ strapi }: { strapi: any }) => ({
     }
 
     ctx.type = 'html';
-    ctx.body = renderTeamMembersList(members);
+    ctx.body = renderTeamMembersList(members, role);
   },
 
   /**
-   * POST /team/members  { username, email, password?, roleType }
+  * POST /team/members  { username, email, password, passwordConfirmation, roleType? }
    * Owner can create Team Leads or Employees. Team Lead can only create
    * Employees. Password is optional — auto-generated when omitted.
    */
@@ -97,8 +120,9 @@ export default ({ strapi }: { strapi: any }) => ({
     const body = ctx.request.body?.data ?? ctx.request.body ?? {};
     const username = String(body.username || '').trim();
     const email = String(body.email || '').trim();
-    const roleType = body.roleType;
+    const roleType = role === ROLE_TEAM_LEAD ? ROLE_EMPLOYEE : body.roleType;
     const providedPassword = typeof body.password === 'string' ? body.password.trim() : '';
+    const passwordConfirmation = typeof body.passwordConfirmation === 'string' ? body.passwordConfirmation.trim() : '';
 
     if (!username || !email) {
       return ctx.badRequest('Username and email are required.');
@@ -112,11 +136,32 @@ export default ({ strapi }: { strapi: any }) => ({
     if (!providedPassword || providedPassword.length < 6) {
       return ctx.badRequest('Password is required and must be at least 6 characters.');
     }
+    if (providedPassword !== passwordConfirmation) {
+      return ctx.badRequest('Password and confirmation do not match.');
+    }
 
     const targetRole = await strapi.db
       .query('plugin::users-permissions.role')
       .findOne({ where: { type: roleType } });
     if (!targetRole) return ctx.badRequest(`Role "${roleType}" is not set up.`);
+
+    const rawProjectIds = Array.isArray(body.projectIds) ? body.projectIds : body.projectIds ? [body.projectIds] : [];
+    const projectIds = rawProjectIds
+      .map(Number).filter((id: number) => Number.isInteger(id) && id > 0);
+    if (role === ROLE_TEAM_LEAD && !projectIds.length) {
+      return ctx.badRequest('Team Lead employees must be assigned to at least one of your projects.');
+    }
+    const allowedProjects = roleType === ROLE_EMPLOYEE
+      ? await strapi.db.query('api::project.project').findMany({
+        where: role === ROLE_TEAM_LEAD
+          ? { id: { $in: projectIds }, users_permissions_user: getUserId(ctx) }
+          : { id: { $in: projectIds } },
+        select: ['id', 'documentId'],
+      })
+      : [];
+    if (allowedProjects.length !== projectIds.length) {
+      return ctx.forbidden('You can only assign Employees to projects within your scope.');
+    }
 
     const password = providedPassword;
 
@@ -135,6 +180,16 @@ export default ({ strapi }: { strapi: any }) => ({
       return ctx.badRequest(
         err?.message || 'Could not create this user (the email or username may already be in use).',
       );
+    }
+
+    if (roleType === ROLE_EMPLOYEE && projectIds.length) {
+      for (const project of allowedProjects) {
+        await strapi.documents('api::project.project').update({
+          documentId: project.documentId,
+          data: { team_members: { connect: [created.id] } },
+          status: 'published',
+        });
+      }
     }
 
     if (!isHtmx(ctx)) {
@@ -186,8 +241,12 @@ export default ({ strapi }: { strapi: any }) => ({
 
     const body = ctx.request.body?.data ?? ctx.request.body ?? {};
     const newPassword = typeof body.password === 'string' ? body.password.trim() : '';
+    const passwordConfirmation = typeof body.passwordConfirmation === 'string' ? body.passwordConfirmation.trim() : '';
     if (!newPassword || newPassword.length < 6) {
       return ctx.badRequest('Password is required and must be at least 6 characters.');
+    }
+    if (newPassword !== passwordConfirmation) {
+      return ctx.badRequest('Password and confirmation do not match.');
     }
     await strapi.plugin('users-permissions').service('user').edit(target.id, { password: newPassword });
 
@@ -198,5 +257,59 @@ export default ({ strapi }: { strapi: any }) => ({
 
     ctx.type = 'html';
     ctx.body = `<div class="password-reveal"><div>Password updated for <strong>${target.username}</strong>.</div></div>`;
+  },
+
+  /** DELETE /team/members/:id. Relations are reassigned or detached first. */
+  async deleteMember(ctx: any) {
+    const role = getRoleType(ctx);
+    const callerId = getUserId(ctx);
+    if (role !== ROLE_OWNER && role !== ROLE_TEAM_LEAD) {
+      return ctx.forbidden('Only Owners and Team Leads can delete team members.');
+    }
+
+    const targetId = Number(ctx.params.id);
+    if (!targetId || targetId === callerId) return ctx.badRequest('This user cannot be deleted here.');
+    const target = await strapi.db.query('plugin::users-permissions.user').findOne({
+      where: { id: targetId },
+      populate: { role: true },
+    });
+    if (!target) return ctx.notFound('User not found.');
+    const targetRole = target.role?.type;
+    if (targetRole === ROLE_OWNER || (role === ROLE_TEAM_LEAD && targetRole !== ROLE_EMPLOYEE)) {
+      return ctx.forbidden('You do not have permission to delete this user.');
+    }
+    if (role === ROLE_TEAM_LEAD && !(await isManagedEmployee(strapi, callerId as number, targetId))) {
+      return ctx.forbidden('You can only delete Employees on your own projects.');
+    }
+
+    const owner = role === ROLE_OWNER
+      ? await strapi.db.query('plugin::users-permissions.user').findOne({
+        where: { role: { type: ROLE_OWNER }, id: { $ne: targetId } },
+      })
+      : null;
+    const projects = await strapi.db.query('api::project.project').findMany({
+      where: targetRole === ROLE_TEAM_LEAD
+        ? { users_permissions_user: targetId }
+        : { team_members: targetId },
+      select: ['id', 'documentId'],
+    });
+    for (const project of projects) {
+      const data = targetRole === ROLE_TEAM_LEAD && owner
+        ? { users_permissions_user: owner.id }
+        : { team_members: { disconnect: [targetId] } };
+      await strapi.documents('api::project.project').update({ documentId: project.documentId, data, status: 'published' });
+    }
+    await strapi.db.query('api::task.task').updateMany({
+      where: { users_permissions_user: targetId },
+      data: { users_permissions_user: null },
+    });
+    await strapi.db.query('plugin::users-permissions.user').delete({ where: { id: targetId } });
+
+    if (!isHtmx(ctx)) {
+      ctx.body = { data: { id: targetId } };
+      return;
+    }
+    ctx.type = 'html';
+    ctx.body = '';
   },
 });

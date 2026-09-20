@@ -6,7 +6,7 @@
     {{durationHtml}}
   </div>
   <div class="time-entry-card__actions">
-    <button type="button" class="btn-icon" data-action="edit-time-entry" title="Edit">✎</button>
-    <button type="button" class="btn-icon btn-delete" data-action="delete-time-entry" title="Delete">🗑</button>
+    <button type="button" class="btn-icon" data-action="edit-time-entry" title="Edit" x-show="can('time-entry.update')">✎</button>
+    <button type="button" class="btn-icon btn-delete" data-action="delete-time-entry" title="Delete" x-show="can('time-entry.delete')">🗑</button>
   </div>
 </article>

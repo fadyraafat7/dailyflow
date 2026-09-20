@@ -1,4 +1,5 @@
 import type { Core } from '@strapi/strapi';
+import { generateRandomPassword } from './utils/password';
 
 /**
  * DailyFlow bootstrap.
@@ -14,9 +15,8 @@ import type { Core } from '@strapi/strapi';
  *      below (safe to re-run — it reconciles rather than duplicating).
  *   3. Revokes the Public role's access to project/task/time-entry (this
  *      is what let the whole app run with zero authentication so far).
- *   4. If there are no users at all yet, creates a default Owner account
- *      with a random password (printed to the console and written to
- *      .owner-credentials.txt) so there's a way to log in at all.
+ *   4. If there are no users at all yet, creates an Owner account using
+ *      deployment-provided identity settings and a random password.
  *   5. Assigns any existing project with no owner to that Owner account,
  *      so pre-existing data doesn't become invisible once Team Lead/
  *      Employee visibility filtering goes live.
@@ -110,6 +110,7 @@ const ACTION_MAP: { uid: string; actions: Record<string, RoleType[]> }[] = [
       listMembers: ['owner', 'team_lead'],
       createMember: ['owner', 'team_lead'],
       resetPassword: ['owner', 'team_lead'],
+      deleteMember: ['owner', 'team_lead'],
     },
   },
 ];
@@ -162,7 +163,7 @@ async function revokePublicAccess(strapi: Core.Strapi) {
   const publicRole = await strapi.db.query('plugin::users-permissions.role').findOne({ where: { type: 'public' } });
   if (!publicRole) return;
 
-  const uids = ['api::project.project', 'api::task.task', 'api::time-entry.time-entry'];
+  const uids = ['api::project.project', 'api::task.task', 'api::time-entry.time-entry', 'api::team.team'];
   const toDelete = await strapi.db.query('plugin::users-permissions.permission').findMany({
     where: {
       role: publicRole.id,
@@ -181,13 +182,22 @@ async function revokePublicAccess(strapi: Core.Strapi) {
 
 async function ensureOwnerAccount(strapi: Core.Strapi, ownerRole: any) {
   const userCount = await strapi.db.query('plugin::users-permissions.user').count();
-  if (userCount > 0) return;
+  const existingOwner = await strapi.db.query('plugin::users-permissions.user').findOne({
+    where: { role: ownerRole.id },
+  });
+  if (existingOwner) return existingOwner;
+  if (userCount > 0) {
+    throw new Error('[dailyflow] Existing users found but no Owner exists. Set an Owner role before starting the app.');
+  }
 
-  const email = 'nohaalideveloper@gmail.com';
-  const username = 'noha';
-  const password = 'Noha@2025';
+  const email = process.env.DAILYFLOW_OWNER_EMAIL?.trim();
+  const username = process.env.DAILYFLOW_OWNER_USERNAME?.trim();
+  if (!email || !username) {
+    throw new Error('[dailyflow] Empty database: set DAILYFLOW_OWNER_EMAIL and DAILYFLOW_OWNER_USERNAME before starting.');
+  }
+  const password = process.env.DAILYFLOW_OWNER_PASSWORD?.trim() || generateRandomPassword();
 
-  await strapi.plugin('users-permissions').service('user').add({
+  const created = await strapi.plugin('users-permissions').service('user').add({
     username,
     email,
     password,
@@ -197,13 +207,14 @@ async function ensureOwnerAccount(strapi: Core.Strapi, ownerRole: any) {
     role: ownerRole.id,
   });
 
-  strapi.log.warn(
-    `[dailyflow] Created default Owner account — email: ${email}, username: ${username}`,
-  );
+  strapi.log.warn(`[dailyflow] Created Owner account for ${email} (${username}).`);
+  if (!process.env.DAILYFLOW_OWNER_PASSWORD) {
+    strapi.log.warn(`[dailyflow] Generated Owner password (store it securely): ${password}`);
+  }
+  return await strapi.db.query('plugin::users-permissions.user').findOne({ where: { id: created.id } });
 }
 
-async function migrateOwnerlessData(strapi: Core.Strapi, ownerRole: any) {
-  const owner = await strapi.db.query('plugin::users-permissions.user').findOne({ where: { role: ownerRole.id } });
+async function migrateOwnerlessData(strapi: Core.Strapi, owner: any) {
   if (!owner) return;
 
   const orphanProjects = await strapi.db.query('api::project.project').findMany({
@@ -227,7 +238,7 @@ export default {
     const roles = await ensureRoles(strapi);
     await reconcilePermissions(strapi, roles);
     await revokePublicAccess(strapi);
-    await ensureOwnerAccount(strapi, roles.owner);
-    await migrateOwnerlessData(strapi, roles.owner);
+    const owner = await ensureOwnerAccount(strapi, roles.owner);
+    await migrateOwnerlessData(strapi, owner);
   },
 };

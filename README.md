@@ -66,14 +66,9 @@ npm install
 npm run develop
 ```
 
-On first run with an empty database, the bootstrap creates:
+On first run with an empty database, set `DAILYFLOW_OWNER_EMAIL` and `DAILYFLOW_OWNER_USERNAME`. You may also set `DAILYFLOW_OWNER_PASSWORD`; otherwise the bootstrap generates a one-time random password and prints it to the server log. The bootstrap then creates:
 
 - Three roles: Owner, Team Lead, Employee
-- A default Owner account:
-  - Email: `nohaalideveloper@gmail.com`
-  - Username: `noha`
-  - Password: `Noha@2025`
-
 The Strapi admin panel is available at `http://localhost:1337/admin`.
 
 ### Frontend
@@ -83,7 +78,7 @@ cd Frontend
 node serve.mjs
 ```
 
-Open `http://localhost:5500` and log in with the Owner credentials above.
+Open `http://localhost:5500` and log in with the Owner credentials configured through environment variables.
 
 ## API Overview
 
@@ -107,8 +102,9 @@ All custom endpoints return HTML fragments when the request includes HTMX header
 | PUT | `/api/time-entries/:id/stop` | Stop running timer |
 | GET | `/api/team/modal` | Team management modal (HTML) |
 | GET | `/api/team/members` | List team members |
-| POST | `/api/team/members` | Create team member (with optional password) |
-| PUT | `/api/team/members/:id/reset-password` | Reset member password |
+| POST | `/api/team/members` | Create team member (password and confirmation required) |
+| POST | `/api/team/members/:id/reset-password` | Reset member password |
+| DELETE | `/api/team/members/:id` | Delete a scoped member after relation handling |
 
 ## Configuration
 

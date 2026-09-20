@@ -12,6 +12,7 @@ import {
   getRoleType,
   getUserId,
   mergeFilters,
+  stripEmptyFilters,
   canAccessProject,
   canManageProject,
   getOwnedProjectIds,
@@ -125,6 +126,7 @@ async function attachCreators(strapi: any, tasks: any[]): Promise<void> {
 
 export default factories.createCoreController('api::task.task', ({ strapi }) => ({
   async find(ctx) {
+    if (ctx.query.filters) ctx.query.filters = stripEmptyFilters(ctx.query.filters);
     // Same restricted-relation issue as project.find() (see
     // src/utils/access.ts) — filtering by `project: { users_permissions_user:
     // userId } }` / `{ team_members: userId }` throws for Team Lead/Employee
@@ -153,11 +155,12 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
     if (!isHtmx(ctx)) return res;
     ctx.type = 'html';
 
-    let html = renderTaskCards(res.data ?? []);
+    const sort = typeof ctx.query.sort === 'string' ? ctx.query.sort : '';
+    let html = renderTaskCards(res.data ?? [], role || '', sort);
 
     const meta = (res as any).meta?.pagination;
     if (meta) {
-      html += renderPaginationNav(meta, 'goToTasksPage');
+      html += renderPaginationNav(meta, '/api/tasks', '#tasks', '#task-filters');
     }
 
     ctx.body = html;
@@ -187,7 +190,7 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
     if (res?.data) await attachCreators(strapi, [res.data]);
     if (!isHtmx(ctx)) return res;
     ctx.type = 'html';
-    ctx.body = renderTaskCard(res.data);
+    ctx.body = renderTaskCard(res.data, role || '');
   },
 
   async create(ctx) {
@@ -252,7 +255,7 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
 
     if (!isHtmx(ctx)) return { data: task };
     ctx.type = 'html';
-    ctx.body = renderTaskCard(task);
+    ctx.body = renderTaskCard(task, getRoleType(ctx) || '');
   },
 
   async update(ctx) {

@@ -42,6 +42,23 @@ export function mergeFilters(ctx: any, extra: any) {
   ctx.query = { ...ctx.query, filters: combined };
 }
 
+/** Remove empty-string values from a nested filters object so Strapi
+ *  doesn't treat them as real constraints (e.g. `$eq: ''`). */
+export function stripEmptyFilters(obj: any): any {
+  if (typeof obj !== 'object' || obj === null) return obj;
+  const out: any = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === '' || v === undefined || v === null) continue;
+    if (typeof v === 'object' && !Array.isArray(v)) {
+      const cleaned = stripEmptyFilters(v);
+      if (Object.keys(cleaned).length) out[k] = cleaned;
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 /** Is this user the Team Lead who owns the given project? */
 export async function isProjectOwner(strapi: any, projectDocId: string, userId: number): Promise<boolean> {
   const project = await strapi.documents('api::project.project').findOne({
@@ -106,6 +123,17 @@ export async function isManagedEmployee(
     where: { users_permissions_user: teamLeadUserId, team_members: employeeUserId },
   });
   return count > 0;
+}
+
+export async function getManagedEmployeeIds(strapi: any, teamLeadUserId: number): Promise<number[]> {
+  const projects = await strapi.db.query('api::project.project').findMany({
+    where: { users_permissions_user: teamLeadUserId },
+    populate: { team_members: { select: ['id'] } },
+  });
+  const employeeIds: number[] = projects.flatMap((project: any) =>
+    (project.team_members || []).map((member: any) => Number(member.id)),
+  );
+  return [...new Set(employeeIds)].filter((id): id is number => Number.isInteger(id) && id > 0);
 }
 
 /**
