@@ -14,8 +14,11 @@ import {
   mergeFilters,
   canAccessProject,
   canManageProject,
+  getOwnedProjectIds,
+  getMemberProjectIds,
   ROLE_OWNER,
   ROLE_TEAM_LEAD,
+  ROLE_EMPLOYEE,
 } from '../../../utils/access';
 
 /** Tasks per page when a request doesn't specify its own pagination. */
@@ -97,12 +100,47 @@ async function getTaskProjectDocId(strapi: any, taskDocId: string): Promise<stri
   return (task as any)?.project?.documentId ?? null;
 }
 
+/**
+ * Backfill `users_permissions_user` (the "Added by <username>" credit) onto
+ * already-fetched tasks. `super.find()`/`super.findOne()` populate this
+ * relation fine, but Strapi's content-API output sanitizer silently drops
+ * it from the response for every role here — Owner included — because
+ * none of our roles has `find` permission on plugin::users-permissions.user
+ * (see src/utils/access.ts for why). The raw Query Engine isn't subject to
+ * that sanitizer, so one extra query fills it back in.
+ */
+async function attachCreators(strapi: any, tasks: any[]): Promise<void> {
+  if (!tasks.length) return;
+  const ids = tasks.map((t) => t.id).filter((id) => id != null);
+  if (!ids.length) return;
+  const rows = await strapi.db.query('api::task.task').findMany({
+    where: { id: { $in: ids } },
+    populate: { users_permissions_user: { select: ['id', 'username'] } },
+  });
+  const byId = new Map(rows.map((r: any) => [r.id, r.users_permissions_user ?? null]));
+  for (const task of tasks) {
+    task.users_permissions_user = byId.get(task.id) ?? null;
+  }
+}
+
 export default factories.createCoreController('api::task.task', ({ strapi }) => ({
   async find(ctx) {
+    // Same restricted-relation issue as project.find() (see
+    // src/utils/access.ts) — filtering by `project: { users_permissions_user:
+    // userId } }` / `{ team_members: userId }` throws for Team Lead/Employee
+    // because that recurses into a relation targeting
+    // plugin::users-permissions.user, which no role has `find` permission
+    // on. Resolve the allowed PROJECT ids first (a plain query, not a
+    // content-API filter) and scope by those instead — `project.id` isn't
+    // itself a restricted relation since api::project.project.find IS
+    // granted to every role.
     const role = getRoleType(ctx);
     const userId = getUserId(ctx);
-    if (role === ROLE_TEAM_LEAD && userId) mergeFilters(ctx, { project: { users_permissions_user: userId } });
-    if (role === 'employee' && userId) mergeFilters(ctx, { project: { team_members: userId } });
+    if (role === ROLE_TEAM_LEAD && userId) {
+      mergeFilters(ctx, { project: { id: { $in: await getOwnedProjectIds(strapi, userId) } } });
+    } else if (role === ROLE_EMPLOYEE && userId) {
+      mergeFilters(ctx, { project: { id: { $in: await getMemberProjectIds(strapi, userId) } } });
+    }
 
     const incomingPagination = (ctx.query.pagination as object) || {};
     ctx.query = {
@@ -111,6 +149,7 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
       pagination: { pageSize: DEFAULT_PAGE_SIZE, page: 1, ...incomingPagination },
     };
     const res = await super.find(ctx);
+    await attachCreators(strapi, res.data ?? []);
     if (!isHtmx(ctx)) return res;
     ctx.type = 'html';
 
@@ -125,13 +164,27 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
   },
 
   async findOne(ctx) {
+    // findOne() targets a single task by id, so — like project.findOne()
+    // — access is checked directly against that one task's project
+    // instead of adding a query filter (which would hit the same
+    // restricted-relation problem described in find() above).
+    const { id } = ctx.params;
     const role = getRoleType(ctx);
-    const userId = getUserId(ctx);
-    if (role === ROLE_TEAM_LEAD && userId) mergeFilters(ctx, { project: { users_permissions_user: userId } });
-    if (role === 'employee' && userId) mergeFilters(ctx, { project: { team_members: userId } });
+    const projectDocId = await getTaskProjectDocId(strapi, id);
+    if (projectDocId) {
+      if (!(await canAccessProject(strapi, ctx, projectDocId))) {
+        return ctx.notFound();
+      }
+    } else if (role !== ROLE_OWNER && role !== ROLE_TEAM_LEAD) {
+      return ctx.notFound();
+    }
 
-    ctx.query = { ...ctx.query, populate: { ...(ctx.query.populate as object), time_entries: true } };
+    ctx.query = {
+      ...ctx.query,
+      populate: { ...(ctx.query.populate as object), time_entries: true },
+    };
     const res = await super.findOne(ctx);
+    if (res?.data) await attachCreators(strapi, [res.data]);
     if (!isHtmx(ctx)) return res;
     ctx.type = 'html';
     ctx.body = renderTaskCard(res.data);
@@ -139,8 +192,6 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
 
   async create(ctx) {
     const data = toData(ctx.request.body);
-    ctx.request.body = { data };
-
     const projectDocId = typeof data.project === 'string' ? data.project : null;
 
     // Every task must belong to a project the caller is authorized for:
@@ -168,9 +219,38 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
       return;
     }
 
-    const res = await super.create(ctx);
-    if (!isHtmx(ctx)) return res;
-    const task = await strapi.documents('api::task.task').findOne({ documentId: res.data.documentId, populate: { time_entries: true } });
+    // Record who actually created the task — independent of the
+    // project's own owning Team Lead — regardless of what (if anything)
+    // the client sent for this field. Purely informational (surfaced as
+    // "Added by <username>" on the card); access control still runs
+    // entirely off the project, not off this field.
+    data.users_permissions_user = getUserId(ctx);
+
+    // Create via Document Service directly instead of super.create() —
+    // same two reasons as project.create() (see src/utils/access.ts and
+    // that method's comment): super.create() 400s on the
+    // users_permissions_user line above for every role including Owner
+    // (content-API blocks setting any plugin::users-permissions.user
+    // relation without `find` permission on that content type), and it
+    // would leave the task as an unpublished draft that find()/findOne()
+    // never returns, since this content type has draftAndPublish on.
+    // IMPORTANT: populate users_permissions_user with an explicit `fields`
+    // list, never `true`/full object. Document Service bypasses the
+    // content-API output sanitizer entirely (that's what makes it usable
+    // here at all — see the comment above) — including the sanitizer step
+    // that normally strips `password`/resetPasswordToken/confirmationToken
+    // from a populated user. `populate: { users_permissions_user: true }`
+    // was verified live to return the creator's bcrypt password hash and
+    // reset tokens in the plain JSON response; restricting to id/username
+    // is what task.attachCreators() and project.attachTeamRelations() also
+    // do, for the same reason.
+    const task = await strapi.documents('api::task.task').create({
+      data,
+      status: 'published',
+      populate: { time_entries: true, users_permissions_user: { fields: ['username'] } },
+    });
+
+    if (!isHtmx(ctx)) return { data: task };
     ctx.type = 'html';
     ctx.body = renderTaskCard(task);
   },
@@ -185,7 +265,15 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
     ctx.request.body = { data: toData(ctx.request.body) };
     const res = await super.update(ctx);
     if (!isHtmx(ctx)) return res;
-    const task = await strapi.documents('api::task.task').findOne({ documentId: res.data.documentId, populate: { time_entries: true } });
+    // Only reached for the HTML branch, but restricted to `fields:
+    // ['username']` anyway (see create()'s comment above) — Document
+    // Service populate isn't sanitized, so `users_permissions_user: true`
+    // would include the password hash even here, one refactor away from
+    // being rendered or returned as-is.
+    const task = await strapi.documents('api::task.task').findOne({
+      documentId: res.data.documentId,
+      populate: { time_entries: true, users_permissions_user: { fields: ['username'] } },
+    });
     ctx.type = 'html';
     ctx.body = renderTaskCard(task);
   },
@@ -278,7 +366,7 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
     }
 
     // 4) Create the task
-    const taskData: any = { title: finalTitle, priority, state };
+    const taskData: any = { title: finalTitle, priority, state, users_permissions_user: userId };
     if (projectDocId) taskData.project = projectDocId;
 
     const task = await strapi.documents('api::task.task').create({

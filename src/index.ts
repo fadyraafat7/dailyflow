@@ -1,7 +1,4 @@
 import type { Core } from '@strapi/strapi';
-import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
 
 /**
  * DailyFlow bootstrap.
@@ -59,6 +56,7 @@ const ACTION_MAP: { uid: string; actions: Record<string, RoleType[]> }[] = [
       create: ['owner', 'team_lead'],
       update: ['owner', 'team_lead'],
       delete: ['owner', 'team_lead'],
+      editForm: ['owner', 'team_lead'],
     },
   },
   {
@@ -94,6 +92,24 @@ const ACTION_MAP: { uid: string; actions: Record<string, RoleType[]> }[] = [
       // Just enough for the frontend to know who's logged in and show
       // the right UI — not general user-management access.
       me: ['owner', 'team_lead', 'employee'],
+    },
+  },
+  {
+    uid: 'plugin::users-permissions.auth',
+    actions: {
+      // Self-service password change — the controller itself also checks
+      // ctx.state.user, this just makes sure our custom roles (which are
+      // not the plugin's built-in "Authenticated" role) are granted it.
+      changePassword: ['owner', 'team_lead', 'employee'],
+    },
+  },
+  {
+    uid: 'api::team.team',
+    actions: {
+      modal: ['owner', 'team_lead'],
+      listMembers: ['owner', 'team_lead'],
+      createMember: ['owner', 'team_lead'],
+      resetPassword: ['owner', 'team_lead'],
     },
   },
 ];
@@ -167,9 +183,9 @@ async function ensureOwnerAccount(strapi: Core.Strapi, ownerRole: any) {
   const userCount = await strapi.db.query('plugin::users-permissions.user').count();
   if (userCount > 0) return;
 
-  const password = crypto.randomBytes(9).toString('base64url');
   const email = 'nohaalideveloper@gmail.com';
   const username = 'noha';
+  const password = 'Noha@2025';
 
   await strapi.plugin('users-permissions').service('user').add({
     username,
@@ -181,26 +197,9 @@ async function ensureOwnerAccount(strapi: Core.Strapi, ownerRole: any) {
     role: ownerRole.id,
   });
 
-  const message = [
-    '=====================================================',
-    'DailyFlow: no users existed yet, so a first account was',
-    'created for you with the Owner role.',
-    `  email:    ${email}`,
-    `  username: ${username}`,
-    `  password: ${password}`,
-    'This password is shown only this once — log in and change',
-    'it from your account settings as soon as you can.',
-    '=====================================================',
-  ].join('\n');
-  strapi.log.warn(message);
-
-  try {
-    const credsPath = path.join(strapi.dirs.app.root, '.owner-credentials.txt');
-    fs.writeFileSync(credsPath, message + '\n', 'utf8');
-    strapi.log.warn(`[dailyflow] Also wrote these credentials to ${credsPath} — delete that file once you've logged in.`);
-  } catch (err) {
-    strapi.log.error('[dailyflow] Could not write .owner-credentials.txt', err as Error);
-  }
+  strapi.log.warn(
+    `[dailyflow] Created default Owner account — email: ${email}, username: ${username}`,
+  );
 }
 
 async function migrateOwnerlessData(strapi: Core.Strapi, ownerRole: any) {

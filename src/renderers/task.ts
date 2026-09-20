@@ -44,6 +44,10 @@ export function renderTaskCard(task: any): string {
     0,
   );
   const runningBadge = runningEntry ? `<span class="badge state--running">running</span> ` : "";
+  const creatorUsername = task.users_permissions_user?.username;
+  const addedBy = creatorUsername
+    ? `<span class="task-card__added-by">Added by ${esc(creatorUsername)}</span>`
+    : "";
   const timeSummary = `<div class="task-card__time">${
     runningEntry && !completedCount
       ? `<div class="task-card__total">${runningBadge}</div>`
@@ -72,6 +76,7 @@ export function renderTaskCard(task: any): string {
     plannedDateRaw,
     timeSummary,
     timerControls,
+    addedBy,
   }).trim();
 }
 

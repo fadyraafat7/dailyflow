@@ -1,61 +1,139 @@
-# 🚀 Getting started with Strapi
+# DailyFlow
 
-Strapi comes with a full featured [Command Line Interface](https://docs.strapi.io/dev-docs/cli) (CLI) which lets you scaffold and manage your project in seconds.
+A task and time-tracking application built with Strapi 5, HTMX, and Alpine.js. Features project management, team collaboration with role-based access control (Owner / Team Lead / Employee), and per-task time entry tracking.
 
-### `develop`
+## Tech Stack
 
-Start your Strapi application with autoReload enabled. [Learn more](https://docs.strapi.io/dev-docs/cli#strapi-develop)
+| Layer | Technology |
+|---|---|
+| Backend | Strapi 5 (TypeScript) |
+| Database | SQLite (default), PostgreSQL, MySQL |
+| Auth | JWT via Strapi users-permissions plugin |
+| Frontend | HTMX 2 + Alpine.js 3 (no build step) |
+| Styling | Vanilla CSS with light/dark theme |
+
+## Project Structure
 
 ```
+dailyflow/          # Strapi backend
+├── config/         # Database, server, middleware, plugin config
+├── src/
+│   ├── api/
+│   │   ├── project/       # Project CRUD + edit-form endpoint
+│   │   ├── task/          # Task CRUD + URL import
+│   │   ├── time-entry/    # Time entry CRUD + stop timer
+│   │   └── team/          # Team member management
+│   ├── extensions/        # Extended user schema (tasks, projects, team_projects relations)
+│   ├── renderers/         # Server-side HTML renderers (project edit form, team modal)
+│   └── utils/             # RBAC helpers, HTML utilities, password generation
+├── views/                 # HTML templates for HTMX responses
+└── .tmp/data.db           # SQLite database (auto-created)
+
+Frontend/           # Standalone SPA (no bundler)
+├── index.html      # Single-page app
+├── config.js       # API base URL + HTMX/Alpine config
+├── app.css         # Full stylesheet with dark mode
+└── serve.mjs       # Static file server (port 5500)
+```
+
+## Content Types
+
+- **Project** -- name, description, state (active/archived), owner, team members
+- **Task** -- title, planned date, priority (low/high), state (pending/active/paused/completed), linked to a project
+- **Time Entry** -- startedAt, stoppedAt, duration, linked to a task
+
+## Roles & Permissions
+
+| | Owner | Team Lead | Employee |
+|---|---|---|---|
+| Projects | Full CRUD | CRUD (own only) | View (assigned only) |
+| Tasks | Full CRUD + delete | Full CRUD + delete | Create/update (assigned projects) |
+| Time Entries | Full CRUD | Full CRUD | Full CRUD (assigned projects) |
+| Team Management | Yes | Yes | No |
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 20-26
+- npm 6+
+
+### Backend
+
+```bash
+cd dailyflow
+npm install
 npm run develop
-# or
-yarn develop
 ```
 
-### `start`
+On first run with an empty database, the bootstrap creates:
 
-Start your Strapi application with autoReload disabled. [Learn more](https://docs.strapi.io/dev-docs/cli#strapi-start)
+- Three roles: Owner, Team Lead, Employee
+- A default Owner account:
+  - Email: `nohaalideveloper@gmail.com`
+  - Username: `noha`
+  - Password: `Noha@2025`
 
-```
-npm run start
-# or
-yarn start
-```
+The Strapi admin panel is available at `http://localhost:1337/admin`.
 
-### `build`
+### Frontend
 
-Build your admin panel. [Learn more](https://docs.strapi.io/dev-docs/cli#strapi-build)
-
-```
-npm run build
-# or
-yarn build
+```bash
+cd Frontend
+node serve.mjs
 ```
 
-## ⚙️ Deployment
+Open `http://localhost:5500` and log in with the Owner credentials above.
 
-Strapi gives you many possible deployment options for your project including [Strapi Cloud](https://cloud.strapi.io). Browse the [deployment section of the documentation](https://docs.strapi.io/dev-docs/deployment) to find the best solution for your use case.
+## API Overview
 
-```
-yarn strapi deploy
-```
+All custom endpoints return HTML fragments when the request includes HTMX headers, and JSON otherwise.
 
-## 📚 Learn more
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/projects` | List projects (paginated, role-filtered) |
+| POST | `/api/projects` | Create project |
+| PUT | `/api/projects/:id` | Update project |
+| DELETE | `/api/projects/:id` | Delete project |
+| GET | `/api/projects/:id/edit-form` | Project edit modal (HTML) |
+| GET | `/api/tasks` | List tasks (paginated, role-filtered) |
+| POST | `/api/tasks` | Create task |
+| PUT | `/api/tasks/:id` | Update task |
+| DELETE | `/api/tasks/:id` | Delete task |
+| POST | `/api/tasks/from-url` | Import task from URL |
+| POST | `/api/tasks/parse-url` | Parse URL metadata |
+| GET | `/api/time-entries` | List time entries |
+| POST | `/api/time-entries` | Create/start time entry |
+| PUT | `/api/time-entries/:id/stop` | Stop running timer |
+| GET | `/api/team/modal` | Team management modal (HTML) |
+| GET | `/api/team/members` | List team members |
+| POST | `/api/team/members` | Create team member (with optional password) |
+| PUT | `/api/team/members/:id/reset-password` | Reset member password |
 
-- [Resource center](https://strapi.io/resource-center) - Strapi resource center.
-- [Strapi documentation](https://docs.strapi.io) - Official Strapi documentation.
-- [Strapi tutorials](https://strapi.io/tutorials) - List of tutorials made by the core team and the community.
-- [Strapi blog](https://strapi.io/blog) - Official Strapi blog containing articles made by the Strapi team and the community.
-- [Changelog](https://strapi.io/changelog) - Find out about the Strapi product updates, new features and general improvements.
+## Configuration
 
-Feel free to check out the [Strapi GitHub repository](https://github.com/strapi/strapi). Your feedback and contributions are welcome!
+### Environment Variables
 
-## ✨ Community
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_CLIENT` | `sqlite` | Database client (`sqlite`, `postgres`, `mysql`) |
+| `DATABASE_HOST` | `127.0.0.1` | Database host (postgres/mysql) |
+| `DATABASE_PORT` | `5432` | Database port |
+| `DATABASE_NAME` | -- | Database name |
+| `DATABASE_USERNAME` | -- | Database user |
+| `DATABASE_PASSWORD` | -- | Database password |
 
-- [Discord](https://discord.strapi.io) - Come chat with the Strapi community including the core team.
-- [Forum](https://forum.strapi.io/) - Place to discuss, ask questions and find answers, show your Strapi project and get feedback or just talk with other Community members.
-- [Awesome Strapi](https://github.com/strapi/awesome-strapi) - A curated list of awesome things related to Strapi.
+### CORS
 
----
+The backend allows requests from `localhost:5500`, `localhost:5173`, `localhost:3000`, and `localhost:8080`. Update `config/middlewares.ts` to add other origins.
 
-<sub>🤫 Psst! [Strapi is hiring](https://strapi.io/careers).</sub>
+## Frontend Features
+
+- Login/logout with JWT stored in localStorage
+- Project list with search, state filter, and pagination
+- Task panel with search, filters (priority, state), sorting, and date grouping
+- Inline time tracking (start/stop timers per task)
+- Team management modal for Owner/Team Lead roles
+- Change password
+- URL-based task import
+- Responsive layout with dark mode support

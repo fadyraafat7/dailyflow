@@ -9,7 +9,16 @@
 import { factories } from '@strapi/strapi';
 import { isHtmx } from '../../../utils/html';
 import { renderTimeEntryCard, renderTimeEntryCards } from '../../../renderers/time-entry';
-import { getRoleType, getUserId, mergeFilters, canAccessProject, ROLE_TEAM_LEAD, ROLE_EMPLOYEE } from '../../../utils/access';
+import {
+	getRoleType,
+	getUserId,
+	mergeFilters,
+	canAccessProject,
+	getOwnedProjectIds,
+	getMemberProjectIds,
+	ROLE_TEAM_LEAD,
+	ROLE_EMPLOYEE,
+} from '../../../utils/access';
 
 function toData(body: any) {
 	const data = body?.data ?? body ?? {};
@@ -38,10 +47,20 @@ function projectDocIdOf(entry: any): string | null {
 
 export default factories.createCoreController('api::time-entry.time-entry', ({ strapi }) => ({
 	async find(ctx) {
+		// Same restricted-relation issue documented in project/task
+		// controllers (see src/utils/access.ts) — `task: { project: {
+		// users_permissions_user: userId } } }` recurses into a relation
+		// targeting plugin::users-permissions.user, which no role has
+		// `find` permission on, and throws. Resolve the allowed project
+		// ids first and filter on `task.project.id` (a plain scalar)
+		// instead.
 		const role = getRoleType(ctx);
 		const userId = getUserId(ctx);
-		if (role === ROLE_TEAM_LEAD && userId) mergeFilters(ctx, { task: { project: { users_permissions_user: userId } } });
-		if (role === ROLE_EMPLOYEE && userId) mergeFilters(ctx, { task: { project: { team_members: userId } } });
+		if (role === ROLE_TEAM_LEAD && userId) {
+			mergeFilters(ctx, { task: { project: { id: { $in: await getOwnedProjectIds(strapi, userId) } } } });
+		} else if (role === ROLE_EMPLOYEE && userId) {
+			mergeFilters(ctx, { task: { project: { id: { $in: await getMemberProjectIds(strapi, userId) } } } });
+		}
 
 		const res = await super.find(ctx);
 		if (!isHtmx(ctx)) return res;
@@ -50,10 +69,20 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 	},
 
 	async findOne(ctx) {
+		// findOne() targets one time entry by id — checked directly against
+		// its task's project instead of adding a query filter, avoiding the
+		// restricted-relation problem described in find() above.
+		const { id } = ctx.params;
 		const role = getRoleType(ctx);
 		const userId = getUserId(ctx);
-		if (role === ROLE_TEAM_LEAD && userId) mergeFilters(ctx, { task: { project: { users_permissions_user: userId } } });
-		if (role === ROLE_EMPLOYEE && userId) mergeFilters(ctx, { task: { project: { team_members: userId } } });
+		if (role === ROLE_TEAM_LEAD || role === ROLE_EMPLOYEE) {
+			if (!userId) return ctx.notFound();
+			const existing = await fetchWithProject(strapi, id);
+			const projectDocId = projectDocIdOf(existing);
+			if (!projectDocId || !(await canAccessProject(strapi, ctx, projectDocId))) {
+				return ctx.notFound();
+			}
+		}
 
 		const res = await super.findOne(ctx);
 		if (!isHtmx(ctx)) return res;

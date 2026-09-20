@@ -90,3 +90,58 @@ export async function canManageProject(strapi: any, ctx: any, projectDocId: stri
   if (role === ROLE_TEAM_LEAD) return isProjectOwner(strapi, projectDocId, userId);
   return false;
 }
+
+/**
+ * Is this Employee a team_member on at least one project owned by this
+ * Team Lead? Used to scope a Team Lead's reach in the team-management API
+ * (src/api/team) to "my own people" rather than every Employee in the
+ * system — the same "own team" boundary applied everywhere else.
+ */
+export async function isManagedEmployee(
+  strapi: any,
+  teamLeadUserId: number,
+  employeeUserId: number,
+): Promise<boolean> {
+  const count = await strapi.db.query('api::project.project').count({
+    where: { users_permissions_user: teamLeadUserId, team_members: employeeUserId },
+  });
+  return count > 0;
+}
+
+/**
+ * Numeric ids of every project owned by this Team Lead / that this
+ * Employee is a team_member of.
+ *
+ * These exist to work around a Strapi content-API restriction: any
+ * `find`/`findOne` filter (or create/update input) that references a
+ * relation is rejected with "Invalid key <field>" unless the caller's
+ * role has its own `find` permission on the RELATION'S TARGET content
+ * type — here, plugin::users-permissions.user. None of our roles are
+ * granted that (it would let Team Leads/Employees list every user
+ * account in the system via GET /api/users, which we don't want), so a
+ * filter like `{ users_permissions_user: userId }` or `{ team_members:
+ * userId }` throws a 400 for every request, for every role — this was
+ * verified live and affects project.find/findOne, task.find/findOne,
+ * and time-entry.find/findOne alike.
+ *
+ * The fix used throughout the project/task/time-entry controllers:
+ * resolve the allowed project ids here via the raw Query Engine (which
+ * is NOT subject to that content-API permission check, same as
+ * Document Service isn't), then filter by `{ id: { $in: [...] } }` —
+ * a plain scalar field, so the restricted-relation check never fires.
+ */
+export async function getOwnedProjectIds(strapi: any, teamLeadUserId: number): Promise<number[]> {
+  const rows = await strapi.db.query('api::project.project').findMany({
+    where: { users_permissions_user: teamLeadUserId },
+    select: ['id'],
+  });
+  return rows.map((r: any) => r.id);
+}
+
+export async function getMemberProjectIds(strapi: any, employeeUserId: number): Promise<number[]> {
+  const rows = await strapi.db.query('api::project.project').findMany({
+    where: { team_members: employeeUserId },
+    select: ['id'],
+  });
+  return rows.map((r: any) => r.id);
+}

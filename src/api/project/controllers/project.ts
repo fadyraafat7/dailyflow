@@ -1,16 +1,19 @@
 /**
  * project controller
-
  */
 
 import { factories } from '@strapi/strapi';
 import { isHtmx, renderPaginationNav } from '../../../utils/html';
-import { renderProjectCards } from '../../../renderers/project';
+import { renderProjectCards, renderProjectEditForm } from '../../../renderers/project';
 import {
   getRoleType,
   getUserId,
   mergeFilters,
   canManageProject,
+  isProjectOwner,
+  isProjectMember,
+  getOwnedProjectIds,
+  getMemberProjectIds,
   ROLE_OWNER,
   ROLE_TEAM_LEAD,
   ROLE_EMPLOYEE,
@@ -27,15 +30,55 @@ function toData(body: any) {
   return data;
 }
 
+/**
+ * Backfill `users_permissions_user`/`team_members` onto an already-fetched
+ * project. Just like task.ts's attachCreators, Strapi's content-API output
+ * sanitizer silently drops both — even for Owner — because no role here
+ * has `find` permission on plugin::users-permissions.user (see
+ * src/utils/access.ts). Without this, the "Edit project" modal's
+ * team-member checkboxes would always render as empty, even right after
+ * successfully assigning someone. The raw Query Engine isn't subject to
+ * that sanitizer.
+ */
+async function attachTeamRelations(strapi: any, project: any): Promise<void> {
+  if (!project) return;
+  const row = await strapi.db.query('api::project.project').findOne({
+    where: { id: project.id },
+    populate: {
+      users_permissions_user: { select: ['id', 'username'] },
+      team_members: { select: ['id', 'username', 'email'] },
+    },
+  });
+  if (!row) return;
+  project.users_permissions_user = row.users_permissions_user ?? null;
+  project.team_members = row.team_members ?? [];
+}
+
+/**
+ * Normalize the team_members value coming from either a JSON API body
+ * ({ set: [1,2] }) or an HTML form (checkbox values as strings, plus a
+ * hidden "_has_team_members" sentinel so an empty selection is
+ * distinguishable from "field not sent").
+ */
+function normalizeTeamMemberIds(raw: any): number[] {
+  if (raw?.set) return raw.set.map(Number).filter(Number.isFinite);
+  if (Array.isArray(raw)) return raw.map(Number).filter((n: number) => Number.isFinite(n) && n > 0);
+  if (typeof raw === 'string' && raw) {
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? [n] : [];
+  }
+  return [];
+}
+
 export default factories.createCoreController('api::project.project', ({ strapi }) => ({
   async find(ctx) {
-    // Scope the list to what this role is allowed to see: Owner sees
-    // everything, Team Lead sees projects they created, Employee sees
-    // only projects they've been added to as a team member.
     const role = getRoleType(ctx);
     const userId = getUserId(ctx);
-    if (role === ROLE_TEAM_LEAD && userId) mergeFilters(ctx, { users_permissions_user: userId });
-    if (role === ROLE_EMPLOYEE && userId) mergeFilters(ctx, { team_members: userId });
+    if (role === ROLE_TEAM_LEAD && userId) {
+      mergeFilters(ctx, { id: { $in: await getOwnedProjectIds(strapi, userId) } });
+    } else if (role === ROLE_EMPLOYEE && userId) {
+      mergeFilters(ctx, { id: { $in: await getMemberProjectIds(strapi, userId) } });
+    }
 
     const incomingPagination = (ctx.query.pagination as object) || {};
     ctx.query = {
@@ -58,36 +101,37 @@ export default factories.createCoreController('api::project.project', ({ strapi 
   },
 
   async findOne(ctx) {
+    const { id } = ctx.params;
     const role = getRoleType(ctx);
     const userId = getUserId(ctx);
-    if (role === ROLE_TEAM_LEAD && userId) mergeFilters(ctx, { users_permissions_user: userId });
-    if (role === ROLE_EMPLOYEE && userId) mergeFilters(ctx, { team_members: userId });
-    return super.findOne(ctx);
+    if (role === ROLE_TEAM_LEAD && userId && !(await isProjectOwner(strapi, id, userId))) {
+      return ctx.notFound();
+    }
+    if (role === ROLE_EMPLOYEE && userId && !(await isProjectMember(strapi, id, userId))) {
+      return ctx.notFound();
+    }
+    const res = await super.findOne(ctx);
+    if (res?.data) await attachTeamRelations(strapi, res.data);
+    return res;
   },
 
-  // Create/update/delete no longer render the list themselves — the
-  // frontend refetches via a "refresh-projects" event so the current
-  // search/filter/page stay in effect instead of resetting to page 1
-  // unfiltered.
   async create(ctx) {
     const role = getRoleType(ctx);
     const userId = getUserId(ctx);
-    // Only Team Leads (and Owners, acting as their own Team Lead) create
-    // projects — Employees are added to a project's team, not creators
-    // of one. The role-permission grants already block Employees from
-    // reaching this action at all; this is just defense in depth.
     if (role !== ROLE_OWNER && role !== ROLE_TEAM_LEAD) {
       return ctx.forbidden('Only Team Leads and Owners can create projects.');
     }
 
     const data = toData(ctx.request.body);
-    // The creator becomes the project's owning Team Lead, regardless of
-    // what (if anything) the client sent for this field.
     data.users_permissions_user = userId;
-    ctx.request.body = { data };
 
-    const res = await super.create(ctx);
-    if (!isHtmx(ctx)) return res;
+    const project = await strapi.documents('api::project.project').create({
+      data,
+      status: 'published',
+      populate: { tasks: true },
+    });
+
+    if (!isHtmx(ctx)) return { data: project };
     ctx.type = 'html';
     ctx.body = '';
   },
@@ -97,8 +141,28 @@ export default factories.createCoreController('api::project.project', ({ strapi 
     if (!(await canManageProject(strapi, ctx, id))) {
       return ctx.forbidden('You do not have access to this project.');
     }
-    ctx.request.body = { data: toData(ctx.request.body) };
+
+    const rawBody = ctx.request.body?.data ?? ctx.request.body ?? {};
+    const hasTeamField = Object.prototype.hasOwnProperty.call(rawBody, 'team_members')
+      || Object.prototype.hasOwnProperty.call(rawBody, '_has_team_members');
+    const rawTeamMembers = rawBody.team_members;
+
+    const data = toData(ctx.request.body);
+    delete data.team_members;
+    delete data._has_team_members;
+    ctx.request.body = { data };
+
     const res = await super.update(ctx);
+
+    if (hasTeamField) {
+      const memberIds = normalizeTeamMemberIds(rawTeamMembers);
+      await strapi.documents('api::project.project').update({
+        documentId: id,
+        data: { team_members: memberIds },
+        status: 'published',
+      });
+    }
+
     if (!isHtmx(ctx)) return res;
     ctx.type = 'html';
     ctx.body = '';
@@ -113,5 +177,37 @@ export default factories.createCoreController('api::project.project', ({ strapi 
     if (!isHtmx(ctx)) return res;
     ctx.type = 'html';
     ctx.body = '';
+  },
+
+  /**
+   * GET /projects/:id/edit-form
+   * Returns the project edit modal HTML with pre-filled values and
+   * team-member checkboxes. Owner/Team Lead only.
+   */
+  async editForm(ctx) {
+    const { id } = ctx.params;
+    if (!(await canManageProject(strapi, ctx, id))) {
+      return ctx.notFound();
+    }
+
+    const project = await strapi.documents('api::project.project').findOne({
+      documentId: id,
+      populate: { tasks: true },
+    });
+    if (!project) return ctx.notFound();
+
+    const row = await strapi.db.query('api::project.project').findOne({
+      where: { id: project.id },
+      populate: { team_members: { select: ['id', 'username'] } },
+    });
+    const currentMemberIds = (row?.team_members || []).map((u: any) => u.id);
+
+    const employees = await strapi.db.query('plugin::users-permissions.user').findMany({
+      where: { role: { type: ROLE_EMPLOYEE } },
+      orderBy: { username: 'asc' },
+    });
+
+    ctx.type = 'html';
+    ctx.body = renderProjectEditForm(project, employees, currentMemberIds);
   },
 }));
