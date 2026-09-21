@@ -18,7 +18,8 @@ const config: Core.Config.Middlewares = [
   {
     name: 'strapi::cors',
     config: {
-      origin: ['http://localhost:1337', 'http://127.0.0.1:1337'],
+      enabled: true,
+      origin: '*',
       headers: '*',
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     },

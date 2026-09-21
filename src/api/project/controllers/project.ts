@@ -78,7 +78,9 @@ export default factories.createCoreController('api::project.project', ({ strapi 
     const role = getRoleType(ctx);
     const userId = getUserId(ctx);
     if (role === ROLE_TEAM_LEAD && userId) {
-      mergeFilters(ctx, { id: { $in: await getOwnedProjectIds(strapi, userId) } });
+      const owned = await getOwnedProjectIds(strapi, userId);
+      const member = await getMemberProjectIds(strapi, userId);
+      mergeFilters(ctx, { id: { $in: [...new Set([...owned, ...member])] } });
     } else if (role === ROLE_EMPLOYEE && userId) {
       mergeFilters(ctx, { id: { $in: await getMemberProjectIds(strapi, userId) } });
     }
@@ -107,7 +109,7 @@ export default factories.createCoreController('api::project.project', ({ strapi 
     const { id } = ctx.params;
     const role = getRoleType(ctx);
     const userId = getUserId(ctx);
-    if (role === ROLE_TEAM_LEAD && userId && !(await isProjectOwner(strapi, id, userId))) {
+    if (role === ROLE_TEAM_LEAD && userId && !(await isProjectOwner(strapi, id, userId)) && !(await isProjectMember(strapi, id, userId))) {
       return ctx.notFound();
     }
     if (role === ROLE_EMPLOYEE && userId && !(await isProjectMember(strapi, id, userId))) {

@@ -62,14 +62,32 @@ export default ({ strapi }: { strapi: any }) => ({
       populate: { role: true },
       orderBy: { username: 'asc' },
     });
-    const projectWhere = role === ROLE_TEAM_LEAD
-      ? { users_permissions_user: getUserId(ctx), publishedAt: { $ne: null } }
-      : { publishedAt: { $ne: null } };
-    const projects = await strapi.db.query('api::project.project').findMany({
-      where: projectWhere,
-      select: ['id', 'name', 'state'],
-      orderBy: { name: 'asc' },
-    });
+    let projects: any[];
+    if (role === ROLE_TEAM_LEAD) {
+      const userId = getUserId(ctx);
+      const ownedIds = (await strapi.db.query('api::project.project').findMany({
+        where: { users_permissions_user: userId, publishedAt: { $ne: null } },
+        select: ['id'],
+      })).map((r: any) => r.id);
+      const memberIds = (await strapi.db.query('api::project.project').findMany({
+        where: { team_members: userId, publishedAt: { $ne: null } },
+        select: ['id'],
+      })).map((r: any) => r.id);
+      const allIds = [...new Set([...ownedIds, ...memberIds])];
+      projects = allIds.length
+        ? await strapi.db.query('api::project.project').findMany({
+            where: { id: { $in: allIds } },
+            select: ['id', 'name', 'state'],
+            orderBy: { name: 'asc' },
+          })
+        : [];
+    } else {
+      projects = await strapi.db.query('api::project.project').findMany({
+        where: { publishedAt: { $ne: null } },
+        select: ['id', 'name', 'state'],
+        orderBy: { name: 'asc' },
+      });
+    }
 
     ctx.type = 'html';
     ctx.body = renderTeamModal(users.map(sanitize), role as string, projects);
