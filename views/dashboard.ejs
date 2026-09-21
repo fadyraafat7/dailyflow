@@ -1,0 +1,11 @@
+<section class="dashboard">
+  <h1><%= title %></h1>
+  <div class="dashboard-widgets">
+    <% widgets.forEach(function(widget) { %>
+      <div class="widget">
+        <h3><%= widget.label %></h3>
+        <span class="widget-value"><%= widget.value %></span>
+      </div>
+    <% }); %>
+  </div>
+</section>

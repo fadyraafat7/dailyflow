@@ -1,0 +1,9 @@
+<article class="product-card" data-id="<%= item.id %>">
+  <h3 class="product-card__name"><%= item.name %></h3>
+  <span class="product-card__price">$<%= item.price %></span>
+  <% if (item.stock) { %>
+    <span class="badge badge--in-stock">In Stock (<%= item.stock %>)</span>
+  <% } else { %>
+    <span class="badge badge--out-of-stock">Out of Stock</span>
+  <% } %>
+</article>

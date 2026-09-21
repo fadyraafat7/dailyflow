@@ -1,9 +1,9 @@
-<article class="time-entry-card" data-id="{{id}}" data-started-at="{{startedAt}}" data-stopped-at="{{stoppedAt}}" data-duration="{{duration}}">
+<article class="time-entry-card" data-id="<%= id %>" data-started-at="<%= startedAt %>" data-stopped-at="<%= stoppedAt %>" data-duration="<%= duration %>">
   <div class="time-entry-card__meta">
-    <span class="badge state--{{status}}">{{status}}</span>
-    <time datetime="{{startedAt}}">{{startedAt}}</time>
-    {{stoppedAtHtml}}
-    {{durationHtml}}
+    <span class="badge state--<%= status %>"><%= status %></span>
+    <time datetime="<%= startedAt %>"><%= startedAt %></time>
+    <%- stoppedAtHtml %>
+    <%- durationHtml %>
   </div>
   <div class="time-entry-card__actions">
     <button type="button" class="btn-icon" data-action="edit-time-entry" title="Edit" x-show="can('time-entry.update')">✎</button>

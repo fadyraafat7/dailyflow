@@ -1,0 +1,23 @@
+<section class="products-page">
+  <h1><%= title %></h1>
+
+  <% if (showBanner) { %>
+    <div class="banner">
+      <%- include('partials/banner') %>
+    </div>
+  <% } %>
+
+  <% if (user) { %>
+    <div class="user-info">Welcome, <%= user.name %>!</div>
+  <% } %>
+
+  <% if (products.length) { %>
+    <div class="product-list">
+      <% products.forEach(function(product) { %>
+        <%- include('partials/product-card', { item: product }) %>
+      <% }); %>
+    </div>
+  <% } else { %>
+    <p class="empty">No products available.</p>
+  <% } %>
+</section>

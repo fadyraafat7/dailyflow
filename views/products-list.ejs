@@ -1,0 +1,9 @@
+<% if (products.length) { %>
+  <div class="product-list">
+    <% products.forEach(function(product) { %>
+      <%- include('partials/product-card', { item: product }) %>
+    <% }); %>
+  </div>
+<% } else { %>
+  <p class="empty">No products available.</p>
+<% } %>

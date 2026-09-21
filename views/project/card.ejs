@@ -1,19 +1,19 @@
-<article class="project-card project-card--clickable" data-id="{{id}}" data-name="{{name}}" data-count="{{count}}" data-state="{{state}}" data-description="{{descriptionText}}"
+<article class="project-card project-card--clickable" data-id="<%= id %>" data-name="<%= name %>" data-count="<%= count %>" data-state="<%= state %>" data-description="<%= descriptionText %>"
   :class="{ 'is-selected': selected && selected.id === $el.dataset.id }"
   @click="selectProject($el)">
   <header class="project-card__head">
-    <h3 class="project-card__name">{{name}}</h3>
-    <span class="badge state--{{state}}">{{state}}</span>
-    <span class="badge badge--count">{{count}} {{taskLabel}}</span>
+    <h3 class="project-card__name"><%= name %></h3>
+    <span class="badge state--<%= state %>"><%= state %></span>
+    <span class="badge badge--count"><%= count %> <%= taskLabel %></span>
     <button type="button" class="btn-icon" title="Edit project" x-show="can('project.update')"
-        hx-get="/api/projects/{{id}}/edit-form" hx-target="#modal-container" hx-swap="innerHTML"
+        hx-get="/api/projects/<%= id %>/edit-form" hx-target="#modal-container" hx-swap="innerHTML"
         @click.stop>✎</button>
     <button type="button" class="btn-icon btn-delete" title="Delete project" x-show="can('project.delete')"
-        hx-delete="/api/projects/{{id}}"
+        hx-delete="/api/projects/<%= id %>"
         hx-swap="none"
         hx-confirm="Are you sure you want to delete this project?"
         @htmx:after-request="$dispatch('refresh-projects')"
         @click.stop>🗑</button>
   </header>
-  {{description}}
+  <%- description %>
 </article>

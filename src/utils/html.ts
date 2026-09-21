@@ -14,20 +14,19 @@ export function isHtmx(ctx: any): boolean {
   return ctx.request.header["hx-request"] === "true";
 }
 
-/** Render a view file using values that have already been escaped for HTML. */
+/** Render an EJS view file with the given data. */
 export function renderView(
   viewName: string,
-  values: Record<string, string | number> = {},
+  values: Record<string, unknown> = {},
 ): string {
+  const ejs = require("ejs");
   const fs = require("node:fs");
   const path = require("node:path");
-  const filePath = path.join(process.cwd(), "views", `${viewName}.html`);
+  const viewsDir = path.join(process.cwd(), "views");
+  const filePath = path.join(viewsDir, `${viewName}.ejs`);
   const template = fs.readFileSync(filePath, "utf8") as string;
 
-  return template.replace(
-    /\{\{\s*([\w-]+)\s*\}\}/g,
-    (_match: string, key: string) => String(values[key] ?? ""),
-  );
+  return ejs.render(template, values, { views: [viewsDir], filename: filePath });
 }
 
 /**
