@@ -1,0 +1,9 @@
+<nav class="pagination">
+  {{#if hasPrev}}
+    <button type="button" class="pagination__nav" hx-get="{{endpoint}}" hx-target="{{target}}" hx-swap="innerHTML" hx-vals='{"pagination[page]": {{prevPage}}}'>‹</button>
+  {{/if}}
+  <span class="pagination__current">Page {{page}} of {{pageCount}}</span>
+  {{#if hasNext}}
+    <button type="button" class="pagination__nav" hx-get="{{endpoint}}" hx-target="{{target}}" hx-swap="innerHTML" hx-vals='{"pagination[page]": {{nextPage}}}'>›</button>
+  {{/if}}
+</nav>

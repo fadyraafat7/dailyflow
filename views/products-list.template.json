@@ -1,0 +1,16 @@
+{
+  "name": "products-list",
+  "type": "fragment",
+  "required": [
+    "products"
+  ],
+  "arrays": [
+    "products"
+  ],
+  "partials": [
+    {
+      "template": "product-card",
+      "source": "products[]"
+    }
+  ]
+}

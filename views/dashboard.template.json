@@ -1,0 +1,11 @@
+{
+  "name": "dashboard",
+  "type": "page",
+  "required": [
+    "title",
+    "widgets"
+  ],
+  "arrays": [
+    "widgets"
+  ]
+}

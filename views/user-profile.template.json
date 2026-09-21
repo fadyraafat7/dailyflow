@@ -1,0 +1,12 @@
+{
+  "name": "user-profile",
+  "type": "page",
+  "required": [
+    "user",
+    "user.name"
+  ],
+  "optional": [
+    "user.role",
+    "user.email"
+  ]
+}

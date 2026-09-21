@@ -1,0 +1,27 @@
+{
+  "name": "products",
+  "type": "page",
+  "required": [
+    "title",
+    "products"
+  ],
+  "optional": [
+    "showBanner",
+    "user",
+    "user.name",
+    "user.role"
+  ],
+  "arrays": [
+    "products"
+  ],
+  "partials": [
+    {
+      "template": "product-card",
+      "source": "products[]"
+    },
+    {
+      "template": "banner",
+      "source": "showBanner"
+    }
+  ]
+}
