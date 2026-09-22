@@ -27,6 +27,7 @@ function formatDateTime(iso: string): string {
   return `${date} ${time}`;
 }
 
+
 export function renderTimeEntryCard(timeEntry: any): string {
   const id = esc(timeEntry.documentId);
   const startedAt = esc(timeEntry.startedAt);
@@ -66,7 +67,9 @@ export function renderTimeEntryList(taskDocId: string, taskTitle: string, entrie
       <td>${formatDateTime(e.startedAt)}</td>
       <td>${running ? '<span class="badge state--running">running</span>' : formatDateTime(e.stoppedAt)}</td>
       <td>${running ? '—' : formatDuration(dur)}</td>
-      <td>${!running ? `<button type="button" class="btn-icon btn-delete" title="Delete"
+      <td style="white-space:nowrap">${!running ? `<button type="button" class="btn-icon" title="Edit"
+        onclick="(function(btn){var f=btn.closest('.task-edit').querySelector('form[data-time-form]');if(!f)return;f.setAttribute('hx-put','/api/time-entries/${esc(e.documentId)}');f.removeAttribute('hx-post');htmx.process(f);function toLocal(iso){var d=new Date(iso);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16)};f.querySelector('[name=startedAt]').value=toLocal('${esc(e.startedAt)}');f.querySelector('[name=stoppedAt]').value=toLocal('${esc(e.stoppedAt)}');f.querySelector('[data-form-label]').textContent='Edit Entry';var sb=f.querySelector('[data-submit-btn]');sb.textContent='Update';var existing=f.querySelector('[data-cancel-edit]');if(existing)existing.remove();var cb=document.createElement('button');cb.type='button';cb.className='btn-ghost';cb.textContent='Cancel Edit';cb.style.color='var(--danger)';cb.setAttribute('data-cancel-edit','');cb.onclick=function(){f.setAttribute('hx-post','/api/time-entries');f.removeAttribute('hx-put');htmx.process(f);var now=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);f.querySelector('[name=startedAt]').value=now;f.querySelector('[name=stoppedAt]').value=now;f.querySelector('[data-form-label]').textContent='New Entry';sb.textContent='Add';cb.remove()};sb.after(cb)})(this)">✎</button>
+        <button type="button" class="btn-icon btn-delete" title="Delete"
         hx-delete="/api/time-entries/${esc(e.documentId)}" hx-swap="none"
         hx-confirm="Delete this time entry?"
         @htmx:after-request="htmx.ajax('GET','/api/time-entries/by-task/${esc(taskDocId)}',{target:'#time-entry-list',swap:'innerHTML'});$dispatch('refresh-tasks')">🗑</button>` : ''}</td>
