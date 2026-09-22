@@ -358,6 +358,12 @@ input:focus, select:focus, textarea:focus {
 .time-entry-card__actions { display: flex; gap: .15rem; }
 .time-entry-card__duration { font-weight: 600; color: var(--text); }
 
+.time-entry-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.time-entry-table th { text-align: left; padding: .4rem .5rem; border-bottom: 2px solid var(--border); color: var(--text-muted); font-weight: 600; }
+.time-entry-table td { padding: .4rem .5rem; border-bottom: 1px solid var(--border); }
+.time-entry-table tfoot td { border-bottom: none; border-top: 2px solid var(--border); }
+#time-entry-list { max-height: 300px; overflow-y: auto; }
+
 /* ---------- Inline edit form ---------- */
 .task-edit { display: flex; flex-direction: column; gap: .7rem; }
 .task-edit h3 { margin: 0 0 .15rem; font-weight: 800; letter-spacing: -.01em; }

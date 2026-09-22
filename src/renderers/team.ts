@@ -66,7 +66,7 @@ function renderSectionedMembers(members: any[], callerRole: string): string {
   return html;
 }
 
-export function renderTeamModal(members: any[], callerRoleType: string, projects: any[] = []): string {
+export function renderTeamModal(members: any[], callerRoleType: string, projects: any[] = [], groups: any[] = []): string {
   const isOwner = callerRoleType === 'owner';
 
   const roleField = isOwner
@@ -76,15 +76,17 @@ export function renderTeamModal(members: any[], callerRoleType: string, projects
       </select>`
     : '<input type="hidden" name="roleType" value="employee" />';
 
-  const projectOptions = projects.length
-    ? `<div id="team-project-picker">
-        <label class="project-picker-label" for="team-projects">Projects</label>
-        <select id="team-projects" name="projectIds" class="project-picker" multiple size="4">
-          ${projects.map((project: any) => `<option value="${esc(project.id)}">${esc(project.name)}${project.state ? ` · ${esc(project.state)}` : ''}</option>`).join('')}
-        </select>
-        <p class="form-hint">Select one or more projects.</p>
+  const groupOptions = groups.length
+    ? `<div>
+        <label class="project-picker-label">Groups</label>
+        <div class="checkbox-list">
+          ${groups.map((g: any) => `<label><input type="checkbox" name="groupIds" value="${g.id}" /> ${esc(g.name)}</label>`).join('')}
+        </div>
+        <p class="form-hint">Select one or more groups.</p>
       </div>`
-    : '<p class="form-hint">No projects available for assignment.</p>';
+    : '<p class="form-hint">No groups available. Create groups first.</p>';
+
+  const projectOptions = '';
 
   const addTitle = isOwner ? 'Add a team member' : 'Add Employee';
 
@@ -102,6 +104,7 @@ export function renderTeamModal(members: any[], callerRoleType: string, projects
         <input type="password" name="password" class="form-control" placeholder="Password" minlength="6" required autocomplete="new-password" />
         <input type="password" name="passwordConfirmation" class="form-control" placeholder="Confirm password" minlength="6" required autocomplete="new-password" />
         ${roleField}
+        ${groupOptions}
         ${projectOptions}
         <div class="task-edit__actions">
           <button type="submit">Add</button>

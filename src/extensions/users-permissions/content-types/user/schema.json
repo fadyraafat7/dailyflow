@@ -78,11 +78,11 @@
       "target": "api::project.project",
       "mappedBy": "users_permissions_user"
     },
-    "team_projects": {
+    "groups": {
       "type": "relation",
       "relation": "manyToMany",
-      "target": "api::project.project",
-      "mappedBy": "team_members"
+      "target": "api::group.group",
+      "mappedBy": "users_permissions_users"
     }
   }
 }

@@ -8,7 +8,7 @@
 
 import { factories } from '@strapi/strapi';
 import { isHtmx } from '../../../utils/html';
-import { renderTimeEntryCard, renderTimeEntryCards } from '../../../renderers/time-entry';
+import { renderTimeEntryCard, renderTimeEntryCards, renderTimeEntryList } from '../../../renderers/time-entry';
 import {
 	getRoleType,
 	getUserId,
@@ -138,6 +138,27 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 		if (!isHtmx(ctx)) return res;
 		ctx.type = 'html';
 		ctx.body = '';
+	},
+
+	async byTask(ctx) {
+		const { taskDocId } = ctx.params;
+		const task = await strapi.documents('api::task.task').findOne({
+			documentId: taskDocId,
+			populate: { project: true },
+		});
+		if (!task) return ctx.notFound();
+		const projectDocId = (task as any)?.project?.documentId ?? null;
+		if (!projectDocId || !(await canAccessProject(strapi, ctx, projectDocId))) {
+			return ctx.forbidden();
+		}
+
+		const entries = await strapi.db.query('api::time-entry.time-entry').findMany({
+			where: { task: { documentId: taskDocId }, publishedAt: { $ne: null } },
+			orderBy: { startedAt: 'desc' },
+		});
+
+		ctx.type = 'html';
+		ctx.body = renderTimeEntryList(taskDocId, task.title || '', entries);
 	},
 
 	/** Stop a running timer: sets stoppedAt to now and computes the duration. */

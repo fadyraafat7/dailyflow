@@ -69,11 +69,9 @@ export default ({ strapi }: { strapi: any }) => ({
         where: { users_permissions_user: userId, publishedAt: { $ne: null } },
         select: ['id'],
       })).map((r: any) => r.id);
-      const memberIds = (await strapi.db.query('api::project.project').findMany({
-        where: { team_members: userId, publishedAt: { $ne: null } },
-        select: ['id'],
-      })).map((r: any) => r.id);
-      const allIds = [...new Set([...ownedIds, ...memberIds])];
+      const { getGroupProjectIds } = require('../../../utils/access');
+      const groupProjectIds = await getGroupProjectIds(strapi, userId);
+      const allIds = [...new Set([...ownedIds, ...groupProjectIds])];
       projects = allIds.length
         ? await strapi.db.query('api::project.project').findMany({
             where: { id: { $in: allIds } },
@@ -89,8 +87,14 @@ export default ({ strapi }: { strapi: any }) => ({
       });
     }
 
+    const groups = await strapi.db.query('api::group.group').findMany({
+      where: { publishedAt: { $ne: null } },
+      select: ['id', 'name'],
+      orderBy: { name: 'asc' },
+    });
+
     ctx.type = 'html';
-    ctx.body = renderTeamModal(users.map(sanitize), role as string, projects);
+    ctx.body = renderTeamModal(users.map(sanitize), role as string, projects, groups);
   },
 
   /**
@@ -166,24 +170,6 @@ export default ({ strapi }: { strapi: any }) => ({
       .findOne({ where: { type: roleType } });
     if (!targetRole) return ctx.badRequest(`Role "${roleType}" is not set up.`);
 
-    const rawProjectIds = Array.isArray(body.projectIds) ? body.projectIds : body.projectIds ? [body.projectIds] : [];
-    const projectIds = rawProjectIds
-      .map(Number).filter((id: number) => Number.isInteger(id) && id > 0);
-    if (role === ROLE_TEAM_LEAD && !projectIds.length) {
-      return ctx.badRequest('Team Lead employees must be assigned to at least one of your projects.');
-    }
-    const allowedProjects = roleType === ROLE_EMPLOYEE
-      ? await strapi.db.query('api::project.project').findMany({
-        where: role === ROLE_TEAM_LEAD
-          ? { id: { $in: projectIds }, users_permissions_user: getUserId(ctx) }
-          : { id: { $in: projectIds } },
-        select: ['id', 'documentId'],
-      })
-      : [];
-    if (allowedProjects.length !== projectIds.length) {
-      return ctx.forbidden('You can only assign Employees to projects within your scope.');
-    }
-
     const password = providedPassword;
 
     let created: any;
@@ -203,11 +189,17 @@ export default ({ strapi }: { strapi: any }) => ({
       );
     }
 
-    if (roleType === ROLE_EMPLOYEE && projectIds.length) {
-      for (const project of allowedProjects) {
-        await strapi.documents('api::project.project').update({
-          documentId: project.documentId,
-          data: { team_members: { connect: [created.id] } },
+    const rawGroupIds = Array.isArray(body.groupIds) ? body.groupIds : body.groupIds ? [body.groupIds] : [];
+    const groupIds = rawGroupIds.map(Number).filter((id: number) => Number.isInteger(id) && id > 0);
+    if (groupIds.length) {
+      const groups = await strapi.db.query('api::group.group').findMany({
+        where: { id: { $in: groupIds }, publishedAt: { $ne: null } },
+        select: ['id', 'documentId'],
+      });
+      for (const group of groups) {
+        await strapi.documents('api::group.group').update({
+          documentId: group.documentId,
+          data: { users_permissions_users: { connect: [created.id] } },
           status: 'published',
         });
       }
@@ -308,17 +300,29 @@ export default ({ strapi }: { strapi: any }) => ({
         where: { role: { type: ROLE_OWNER }, id: { $ne: targetId } },
       })
       : null;
-    const projects = await strapi.db.query('api::project.project').findMany({
-      where: targetRole === ROLE_TEAM_LEAD
-        ? { users_permissions_user: targetId }
-        : { team_members: targetId },
+    if (targetRole === ROLE_TEAM_LEAD && owner) {
+      const ownedProjects = await strapi.db.query('api::project.project').findMany({
+        where: { users_permissions_user: targetId },
+        select: ['id', 'documentId'],
+      });
+      for (const project of ownedProjects) {
+        await strapi.documents('api::project.project').update({
+          documentId: project.documentId,
+          data: { users_permissions_user: owner.id },
+          status: 'published',
+        });
+      }
+    }
+    const userGroups = await strapi.db.query('api::group.group').findMany({
+      where: { users_permissions_users: targetId, publishedAt: { $ne: null } },
       select: ['id', 'documentId'],
     });
-    for (const project of projects) {
-      const data = targetRole === ROLE_TEAM_LEAD && owner
-        ? { users_permissions_user: owner.id }
-        : { team_members: { disconnect: [targetId] } };
-      await strapi.documents('api::project.project').update({ documentId: project.documentId, data, status: 'published' });
+    for (const group of userGroups) {
+      await strapi.documents('api::group.group').update({
+        documentId: group.documentId,
+        data: { users_permissions_users: { disconnect: [targetId] } },
+        status: 'published',
+      });
     }
     await strapi.db.query('api::task.task').updateMany({
       where: { users_permissions_user: targetId },

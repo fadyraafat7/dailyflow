@@ -48,6 +48,10 @@ export function renderTaskCard(task: any, role = ""): string {
   const addedBy = creatorUsername
     ? `<span class="task-card__added-by">Added by ${esc(creatorUsername)}</span>`
     : "";
+  const assignedUsername = task.assigned_to?.username;
+  const assignedTo = assignedUsername
+    ? `<span class="badge state--active">👤 ${esc(assignedUsername)}</span>`
+    : "";
   const timeSummary = `<div class="task-card__time">${
     runningEntry && !completedCount
       ? `<div class="task-card__total">${runningBadge}</div>`
@@ -77,6 +81,8 @@ export function renderTaskCard(task: any, role = ""): string {
     timeSummary,
     timerControls,
     addedBy,
+    assignedTo,
+    assignedToId: task.assigned_to?.id || '',
     canDelete: role === "owner" || role === "team_lead" ? "" : "hidden",
   }).trim();
 }

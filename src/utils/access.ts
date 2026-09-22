@@ -1,20 +1,12 @@
 /**
  * Shared role-based access control helpers for DailyFlow.
  *
- * Three roles, set on plugin::users-permissions.role via bootstrap (see
- * src/index.ts):
+ * Three roles:
  *   - owner:     sees and manages everything.
- *   - team_lead: creates/owns Projects (project.users_permissions_user)
- *                and manages the tasks/time entries inside them.
- *   - employee:  only sees Projects they've been added to as a team
- *                member (project.team_members), and can add/edit (not
- *                delete) tasks inside those projects.
+ *   - team_lead: creates/owns Projects, manages tasks/time entries.
+ *   - employee:  sees Projects linked to their groups or assigned to them.
  *
- * Row-level scoping (which of *their* projects a Team Lead/Employee can
- * see or touch) is not something the Strapi permission system does on
- * its own — it only gates whole actions per role. These helpers add that
- * scoping on top, either via ctx.query.filters (for find/findOne) or via
- * an explicit ownership/membership check (for create/update/delete).
+ * Membership is determined through Groups (not direct project team_members).
  */
 
 export const ROLE_OWNER = 'owner';
@@ -31,19 +23,12 @@ export function getUserId(ctx: any): number | null {
   return ctx.state?.user?.id ?? null;
 }
 
-/**
- * Merge an extra filters object into ctx.query.filters (AND'd with
- * whatever filters the request already carries) so the core controller's
- * find/findOne only ever sees rows the caller is scoped to.
- */
 export function mergeFilters(ctx: any, extra: any) {
   const existing = (ctx.query as any)?.filters;
   const combined = existing ? { $and: [existing, extra] } : extra;
   ctx.query = { ...ctx.query, filters: combined };
 }
 
-/** Remove empty-string values from a nested filters object so Strapi
- *  doesn't treat them as real constraints (e.g. `$eq: ''`). */
 export function stripEmptyFilters(obj: any): any {
   if (typeof obj !== 'object' || obj === null) return obj;
   const out: any = {};
@@ -68,20 +53,19 @@ export async function isProjectOwner(strapi: any, projectDocId: string, userId: 
   return !!project && project.users_permissions_user?.id === userId;
 }
 
-/** Is this user an Employee assigned to the given project's team? */
+/** Is this user a member of the given project via groups? */
 export async function isProjectMember(strapi: any, projectDocId: string, userId: number): Promise<boolean> {
+  const projectGroupIds = await getGroupProjectIds(strapi, userId);
   const project = await strapi.documents('api::project.project').findOne({
     documentId: projectDocId,
-    populate: { team_members: true },
   });
-  return !!project && (project.team_members || []).some((u: any) => u.id === userId);
+  if (!project) return false;
+  return projectGroupIds.includes(project.id);
 }
 
 /**
- * Can this caller read/add-to/edit-within the given project? Owner:
- * always. Team Lead: only their own project. Employee: only projects
- * they're a team member of. Used for task/time-entry create+update and
- * for read-scoping.
+ * Can this caller read/add-to/edit-within the given project?
+ * Also checks assigned tasks.
  */
 export async function canAccessProject(strapi: any, ctx: any, projectDocId: string): Promise<boolean> {
   const role = getRoleType(ctx);
@@ -89,18 +73,21 @@ export async function canAccessProject(strapi: any, ctx: any, projectDocId: stri
   if (!userId || !projectDocId) return false;
   if (role === ROLE_OWNER) return true;
   if (role === ROLE_TEAM_LEAD) {
-    return (await isProjectOwner(strapi, projectDocId, userId)) || (await isProjectMember(strapi, projectDocId, userId));
+    if (await isProjectOwner(strapi, projectDocId, userId)) return true;
+    if (await isProjectMember(strapi, projectDocId, userId)) return true;
+    const assignedIds = await getAssignedProjectIds(strapi, userId);
+    const project = await strapi.documents('api::project.project').findOne({ documentId: projectDocId });
+    return !!project && assignedIds.includes(project.id);
   }
-  if (role === ROLE_EMPLOYEE) return isProjectMember(strapi, projectDocId, userId);
+  if (role === ROLE_EMPLOYEE) {
+    if (await isProjectMember(strapi, projectDocId, userId)) return true;
+    const assignedIds = await getAssignedProjectIds(strapi, userId);
+    const project = await strapi.documents('api::project.project').findOne({ documentId: projectDocId });
+    return !!project && assignedIds.includes(project.id);
+  }
   return false;
 }
 
-/**
- * Can this caller manage (create/update/delete) the project itself, or
- * delete a task within it? Owner: always. Team Lead: only their own
- * project. Employee: never — Employees only add/edit tasks, they don't
- * manage projects or delete tasks.
- */
 export async function canManageProject(strapi: any, ctx: any, projectDocId: string): Promise<boolean> {
   const role = getRoleType(ctx);
   const userId = getUserId(ctx);
@@ -111,55 +98,39 @@ export async function canManageProject(strapi: any, ctx: any, projectDocId: stri
 }
 
 /**
- * Is this Employee a team_member on at least one project owned by this
- * Team Lead? Used to scope a Team Lead's reach in the team-management API
- * (src/api/team) to "my own people" rather than every Employee in the
- * system — the same "own team" boundary applied everywhere else.
+ * Is this Employee in the same group as the Team Lead?
  */
 export async function isManagedEmployee(
   strapi: any,
   teamLeadUserId: number,
   employeeUserId: number,
 ): Promise<boolean> {
-  const count = await strapi.db.query('api::project.project').count({
-    where: { users_permissions_user: teamLeadUserId, team_members: employeeUserId },
+  const leadGroups = await strapi.db.query('api::group.group').findMany({
+    where: { users_permissions_users: teamLeadUserId, publishedAt: { $ne: null } },
+    populate: { users_permissions_users: { select: ['id'] } },
   });
-  return count > 0;
+  for (const group of leadGroups) {
+    if ((group.users_permissions_users || []).some((u: any) => u.id === employeeUserId)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export async function getManagedEmployeeIds(strapi: any, teamLeadUserId: number): Promise<number[]> {
-  const projects = await strapi.db.query('api::project.project').findMany({
-    where: { users_permissions_user: teamLeadUserId },
-    populate: { team_members: { select: ['id'] } },
+  const groups = await strapi.db.query('api::group.group').findMany({
+    where: { users_permissions_users: teamLeadUserId, publishedAt: { $ne: null } },
+    populate: { users_permissions_users: { select: ['id'] } },
   });
-  const employeeIds: number[] = projects.flatMap((project: any) =>
-    (project.team_members || []).map((member: any) => Number(member.id)),
+  const employeeIds: number[] = groups.flatMap((g: any) =>
+    (g.users_permissions_users || []).map((u: any) => Number(u.id)),
   );
-  return [...new Set(employeeIds)].filter((id): id is number => Number.isInteger(id) && id > 0);
+  const unique = [...new Set(employeeIds)].filter((id): id is number =>
+    Number.isInteger(id) && id > 0 && id !== teamLeadUserId,
+  );
+  return unique;
 }
 
-/**
- * Numeric ids of every project owned by this Team Lead / that this
- * Employee is a team_member of.
- *
- * These exist to work around a Strapi content-API restriction: any
- * `find`/`findOne` filter (or create/update input) that references a
- * relation is rejected with "Invalid key <field>" unless the caller's
- * role has its own `find` permission on the RELATION'S TARGET content
- * type — here, plugin::users-permissions.user. None of our roles are
- * granted that (it would let Team Leads/Employees list every user
- * account in the system via GET /api/users, which we don't want), so a
- * filter like `{ users_permissions_user: userId }` or `{ team_members:
- * userId }` throws a 400 for every request, for every role — this was
- * verified live and affects project.find/findOne, task.find/findOne,
- * and time-entry.find/findOne alike.
- *
- * The fix used throughout the project/task/time-entry controllers:
- * resolve the allowed project ids here via the raw Query Engine (which
- * is NOT subject to that content-API permission check, same as
- * Document Service isn't), then filter by `{ id: { $in: [...] } }` —
- * a plain scalar field, so the restricted-relation check never fires.
- */
 export async function getOwnedProjectIds(strapi: any, teamLeadUserId: number): Promise<number[]> {
   const rows = await strapi.db.query('api::project.project').findMany({
     where: { users_permissions_user: teamLeadUserId },
@@ -168,10 +139,29 @@ export async function getOwnedProjectIds(strapi: any, teamLeadUserId: number): P
   return rows.map((r: any) => r.id);
 }
 
-export async function getMemberProjectIds(strapi: any, employeeUserId: number): Promise<number[]> {
-  const rows = await strapi.db.query('api::project.project').findMany({
-    where: { team_members: employeeUserId },
-    select: ['id'],
+export async function getAssignedProjectIds(strapi: any, userId: number): Promise<number[]> {
+  const tasks = await strapi.db.query('api::task.task').findMany({
+    where: { assigned_to: userId, publishedAt: { $ne: null } },
+    populate: { project: { select: ['id'] } },
   });
-  return rows.map((r: any) => r.id);
+  const ids: number[] = tasks
+    .map((t: any) => t.project?.id)
+    .filter((id: any): id is number => Number.isInteger(id) && id > 0);
+  return [...new Set(ids)];
+}
+
+export async function getGroupProjectIds(strapi: any, userId: number): Promise<number[]> {
+  const groups = await strapi.db.query('api::group.group').findMany({
+    where: { users_permissions_users: userId, publishedAt: { $ne: null } },
+    populate: { projects: { select: ['id'] } },
+  });
+  const ids: number[] = groups.flatMap((g: any) =>
+    (g.projects || []).map((p: any) => Number(p.id)),
+  );
+  return [...new Set(ids)].filter((id): id is number => Number.isInteger(id) && id > 0);
+}
+
+/** @deprecated Use getGroupProjectIds instead */
+export async function getMemberProjectIds(strapi: any, employeeUserId: number): Promise<number[]> {
+  return getGroupProjectIds(strapi, employeeUserId);
 }

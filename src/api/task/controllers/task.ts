@@ -16,7 +16,9 @@ import {
   canAccessProject,
   canManageProject,
   getOwnedProjectIds,
+  getGroupProjectIds,
   getMemberProjectIds,
+  getManagedEmployeeIds,
   ROLE_OWNER,
   ROLE_TEAM_LEAD,
   ROLE_EMPLOYEE,
@@ -116,12 +118,31 @@ async function attachCreators(strapi: any, tasks: any[]): Promise<void> {
   if (!ids.length) return;
   const rows = await strapi.db.query('api::task.task').findMany({
     where: { id: { $in: ids } },
-    populate: { users_permissions_user: { select: ['id', 'username'] } },
+    populate: {
+      users_permissions_user: { select: ['id', 'username'] },
+      assigned_to: { select: ['id', 'username'] },
+    },
   });
-  const byId = new Map(rows.map((r: any) => [r.id, r.users_permissions_user ?? null]));
+  const byId = new Map<number, any>(rows.map((r: any) => [r.id, r]));
   for (const task of tasks) {
-    task.users_permissions_user = byId.get(task.id) ?? null;
+    const row: any = byId.get(task.id);
+    (task as any).users_permissions_user = row?.users_permissions_user ?? null;
+    (task as any).assigned_to = row?.assigned_to ?? null;
   }
+}
+
+async function isUserInProjectGroups(strapi: any, userId: number, projectDocId: string): Promise<boolean> {
+  if (!projectDocId || !userId) return false;
+  const groups = await strapi.db.query('api::group.group').findMany({
+    where: {
+      projects: { documentId: projectDocId },
+      users_permissions_users: userId,
+      publishedAt: { $ne: null },
+    },
+    select: ['id'],
+    limit: 1,
+  });
+  return groups.length > 0;
 }
 
 export default factories.createCoreController('api::task.task', ({ strapi }) => ({
@@ -138,10 +159,33 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
     // granted to every role.
     const role = getRoleType(ctx);
     const userId = getUserId(ctx);
+    const assignedTaskIds = userId ? (await strapi.db.query('api::task.task').findMany({
+      where: { assigned_to: userId },
+      select: ['id'],
+    })).map((t: any) => t.id) : [];
+
     if (role === ROLE_TEAM_LEAD && userId) {
-      mergeFilters(ctx, { project: { id: { $in: await getOwnedProjectIds(strapi, userId) } } });
+      const ownedIds = await getOwnedProjectIds(strapi, userId);
+      const groupProjectIds = await getGroupProjectIds(strapi, userId);
+      const allProjectIds = [...new Set([...ownedIds, ...groupProjectIds])];
+      if (assignedTaskIds.length) {
+        mergeFilters(ctx, { $or: [
+          { project: { id: { $in: allProjectIds } } },
+          { id: { $in: assignedTaskIds } },
+        ]});
+      } else {
+        mergeFilters(ctx, { project: { id: { $in: allProjectIds } } });
+      }
     } else if (role === ROLE_EMPLOYEE && userId) {
-      mergeFilters(ctx, { project: { id: { $in: await getMemberProjectIds(strapi, userId) } } });
+      const memberProjectIds = await getMemberProjectIds(strapi, userId);
+      if (assignedTaskIds.length) {
+        mergeFilters(ctx, { $or: [
+          { project: { id: { $in: memberProjectIds } } },
+          { id: { $in: assignedTaskIds } },
+        ]});
+      } else {
+        mergeFilters(ctx, { project: { id: { $in: memberProjectIds } } });
+      }
     }
 
     const incomingPagination = (ctx.query.pagination as object) || {};
@@ -229,6 +273,16 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
     // entirely off the project, not off this field.
     data.users_permissions_user = getUserId(ctx);
 
+    if (data.assigned_to) {
+      data.assigned_to = Number(data.assigned_to) || null;
+    }
+
+    if (data.assigned_to && projectDocId) {
+      if (!(await isUserInProjectGroups(strapi, data.assigned_to, projectDocId))) {
+        return ctx.badRequest('The assigned user does not belong to any group linked to this project.');
+      }
+    }
+
     // Create via Document Service directly instead of super.create() —
     // same two reasons as project.create() (see src/utils/access.ts and
     // that method's comment): super.create() 400s on the
@@ -250,7 +304,7 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
     const task = await strapi.documents('api::task.task').create({
       data,
       status: 'published',
-      populate: { time_entries: true, users_permissions_user: { fields: ['username'] } },
+      populate: { time_entries: true, users_permissions_user: { fields: ['username'] }, assigned_to: { fields: ['username'] } },
     });
 
     if (!isHtmx(ctx)) return { data: task };
@@ -265,17 +319,33 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
       return ctx.forbidden('You do not have access to this task.');
     }
 
-    ctx.request.body = { data: toData(ctx.request.body) };
+    const updateData = toData(ctx.request.body);
+    const assignedToValue = updateData.assigned_to !== undefined
+      ? (updateData.assigned_to ? Number(updateData.assigned_to) : null)
+      : undefined;
+    delete updateData.assigned_to;
+
+    if (assignedToValue && projectDocId) {
+      if (!(await isUserInProjectGroups(strapi, assignedToValue, projectDocId))) {
+        return ctx.badRequest('The assigned user does not belong to any group linked to this project.');
+      }
+    }
+
+    ctx.request.body = { data: updateData };
     const res = await super.update(ctx);
+
+    if (assignedToValue !== undefined) {
+      await strapi.documents('api::task.task').update({
+        documentId: res.data.documentId,
+        data: { assigned_to: assignedToValue },
+        status: 'published',
+      });
+    }
+
     if (!isHtmx(ctx)) return res;
-    // Only reached for the HTML branch, but restricted to `fields:
-    // ['username']` anyway (see create()'s comment above) — Document
-    // Service populate isn't sanitized, so `users_permissions_user: true`
-    // would include the password hash even here, one refactor away from
-    // being rendered or returned as-is.
     const task = await strapi.documents('api::task.task').findOne({
       documentId: res.data.documentId,
-      populate: { time_entries: true, users_permissions_user: { fields: ['username'] } },
+      populate: { time_entries: true, users_permissions_user: { fields: ['username'] }, assigned_to: { fields: ['username'] } },
     });
     ctx.type = 'html';
     ctx.body = renderTaskCard(task);
@@ -422,5 +492,46 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
 
     ctx.type = 'html';
     ctx.body = html;
+  },
+
+  async assignableUsers(ctx) {
+    const role = getRoleType(ctx);
+    if (role !== ROLE_OWNER && role !== ROLE_TEAM_LEAD) {
+      return ctx.forbidden();
+    }
+    const projectDocId = ctx.query.project as string;
+    const selected = ctx.query.selected ? Number(ctx.query.selected) : null;
+
+    let users: any[] = [];
+    if (projectDocId) {
+      const groups = await strapi.db.query('api::group.group').findMany({
+        where: {
+          projects: { documentId: projectDocId },
+          publishedAt: { $ne: null },
+        },
+        populate: { users_permissions_users: { select: ['id', 'username'] } },
+      });
+      const userMap = new Map<number, any>();
+      for (const g of groups) {
+        for (const u of g.users_permissions_users || []) {
+          userMap.set(u.id, u);
+        }
+      }
+      users = [...userMap.values()].sort((a, b) => a.username.localeCompare(b.username));
+
+      if (role === ROLE_TEAM_LEAD) {
+        const userId = getUserId(ctx);
+        const empIds = await getManagedEmployeeIds(strapi, userId as number);
+        const empSet = new Set(empIds);
+        users = users.filter((u) => empSet.has(u.id));
+      }
+    }
+
+    const options = users.map((u: any) =>
+      `<option value="${u.id}" ${selected === u.id ? 'selected' : ''}>${esc(u.username)}</option>`
+    ).join('');
+
+    ctx.type = 'html';
+    ctx.body = `<option value="">Unassigned</option>${options}`;
   },
 }));

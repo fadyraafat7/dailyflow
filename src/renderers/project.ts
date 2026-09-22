@@ -1,25 +1,60 @@
 import { esc, renderView } from "../utils/html";
 
+export function renderProjectCreateForm(allGroups: any[]): string {
+  let groupCheckboxes = "";
+  if (allGroups.length) {
+    groupCheckboxes = allGroups
+      .map((g: any) =>
+        `<label><input type="checkbox" name="groupIds" value="${g.id}" /> ${esc(g.name)}</label>`,
+      )
+      .join("\n");
+  } else {
+    groupCheckboxes =
+      '<p class="form-hint">No groups available. Create groups first.</p>';
+  }
+
+  return `<div class="modal" id="project-create-modal-wrap" onclick="if(event.target===this)this.remove()">
+  <form class="task-edit" hx-post="/api/projects" hx-swap="none"
+    @htmx:after-request="if($event.detail.successful){document.getElementById('project-create-modal-wrap')?.remove();htmx.trigger(document.body,'refresh-projects')}">
+    <h3>New project</h3>
+    <input type="text" name="name" class="form-control" placeholder="Project name" required />
+    <textarea name="description" class="form-control" rows="4" placeholder="Project description"></textarea>
+    <select name="state" class="form-select">
+      <option value="active">active</option>
+      <option value="archived">archived</option>
+    </select>
+    <label class="url-import__label">Groups</label>
+    <div class="checkbox-list">
+      ${groupCheckboxes}
+    </div>
+    <div class="task-edit__actions">
+      <button type="submit">Add</button>
+      <button type="button" class="btn-ghost" onclick="document.getElementById('project-create-modal-wrap')?.remove()">Cancel</button>
+    </div>
+  </form>
+</div>`;
+}
+
 export function renderProjectEditForm(
   project: any,
-  employees: any[],
-  currentMemberIds: number[],
+  allGroups: any[],
+  currentGroupIds: number[],
 ): string {
   const docId = esc(project.documentId);
   const nameVal = esc(project.name || "");
   const descVal = esc(project.description || "");
 
-  let checkboxes = "";
-  if (employees.length) {
-    checkboxes = employees
-      .map((e: any) => {
-        const checked = currentMemberIds.includes(e.id) ? " checked" : "";
-        return `<label><input type="checkbox" name="team_members" value="${e.id}"${checked} /> ${esc(e.username)}</label>`;
+  let groupCheckboxes = "";
+  if (allGroups.length) {
+    groupCheckboxes = allGroups
+      .map((g: any) => {
+        const checked = currentGroupIds.includes(g.id) ? " checked" : "";
+        return `<label><input type="checkbox" name="groupIds" value="${g.id}"${checked} /> ${esc(g.name)}</label>`;
       })
       .join("\n");
   } else {
-    checkboxes =
-      '<p class="form-hint">No employees yet — add one from the Team panel first.</p>';
+    groupCheckboxes =
+      '<p class="form-hint">No groups available. Create groups first.</p>';
   }
 
   return `<div class="modal" id="project-edit-modal" onclick="if(event.target===this)this.remove()">
@@ -32,10 +67,10 @@ export function renderProjectEditForm(
       <option value="active"${project.state === "active" ? " selected" : ""}>active</option>
       <option value="archived"${project.state === "archived" ? " selected" : ""}>archived</option>
     </select>
-    <label class="url-import__label">Team members</label>
+    <label class="url-import__label">Groups</label>
     <div class="checkbox-list">
-      <input type="hidden" name="_has_team_members" value="1" />
-      ${checkboxes}
+      <input type="hidden" name="_has_groupIds" value="1" />
+      ${groupCheckboxes}
     </div>
     <div class="task-edit__actions">
       <button type="submit">Save</button>

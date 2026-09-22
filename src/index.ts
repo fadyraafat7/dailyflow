@@ -84,6 +84,7 @@ const ACTION_MAP: { uid: string; actions: Record<string, RoleType[]> }[] = [
       update: ['owner', 'team_lead', 'employee'],
       delete: ['owner', 'team_lead', 'employee'],
       stop: ['owner', 'team_lead', 'employee'],
+      byTask: ['owner', 'team_lead', 'employee'],
     },
   },
   {

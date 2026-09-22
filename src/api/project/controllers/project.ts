@@ -4,7 +4,7 @@
 
 import { factories } from '@strapi/strapi';
 import { isHtmx, renderPaginationNav } from '../../../utils/html';
-import { renderProjectCards, renderProjectEditForm } from '../../../renderers/project';
+import { renderProjectCards, renderProjectCreateForm, renderProjectEditForm } from '../../../renderers/project';
 import {
   getRoleType,
   getUserId,
@@ -14,8 +14,8 @@ import {
   isProjectOwner,
   isProjectMember,
   getOwnedProjectIds,
-  getMemberProjectIds,
-  getManagedEmployeeIds,
+  getGroupProjectIds,
+  getAssignedProjectIds,
   ROLE_OWNER,
   ROLE_TEAM_LEAD,
   ROLE_EMPLOYEE,
@@ -48,28 +48,10 @@ async function attachTeamRelations(strapi: any, project: any): Promise<void> {
     where: { id: project.id },
     populate: {
       users_permissions_user: { select: ['id', 'username'] },
-      team_members: { select: ['id', 'username', 'email'] },
     },
   });
   if (!row) return;
   project.users_permissions_user = row.users_permissions_user ?? null;
-  project.team_members = row.team_members ?? [];
-}
-
-/**
- * Normalize the team_members value coming from either a JSON API body
- * ({ set: [1,2] }) or an HTML form (checkbox values as strings, plus a
- * hidden "_has_team_members" sentinel so an empty selection is
- * distinguishable from "field not sent").
- */
-function normalizeTeamMemberIds(raw: any): number[] {
-  if (raw?.set) return raw.set.map(Number).filter(Number.isFinite);
-  if (Array.isArray(raw)) return raw.map(Number).filter((n: number) => Number.isFinite(n) && n > 0);
-  if (typeof raw === 'string' && raw) {
-    const n = Number(raw);
-    return Number.isFinite(n) && n > 0 ? [n] : [];
-  }
-  return [];
 }
 
 export default factories.createCoreController('api::project.project', ({ strapi }) => ({
@@ -78,11 +60,18 @@ export default factories.createCoreController('api::project.project', ({ strapi 
     const role = getRoleType(ctx);
     const userId = getUserId(ctx);
     if (role === ROLE_TEAM_LEAD && userId) {
-      const owned = await getOwnedProjectIds(strapi, userId);
-      const member = await getMemberProjectIds(strapi, userId);
-      mergeFilters(ctx, { id: { $in: [...new Set([...owned, ...member])] } });
+      const [owned, groupProjects, assigned] = await Promise.all([
+        getOwnedProjectIds(strapi, userId),
+        getGroupProjectIds(strapi, userId),
+        getAssignedProjectIds(strapi, userId),
+      ]);
+      mergeFilters(ctx, { id: { $in: [...new Set([...owned, ...groupProjects, ...assigned])] } });
     } else if (role === ROLE_EMPLOYEE && userId) {
-      mergeFilters(ctx, { id: { $in: await getMemberProjectIds(strapi, userId) } });
+      const [groupProjects, assigned] = await Promise.all([
+        getGroupProjectIds(strapi, userId),
+        getAssignedProjectIds(strapi, userId),
+      ]);
+      mergeFilters(ctx, { id: { $in: [...new Set([...groupProjects, ...assigned])] } });
     }
 
     const incomingPagination = (ctx.query.pagination as object) || {};
@@ -130,11 +119,29 @@ export default factories.createCoreController('api::project.project', ({ strapi 
     const data = toData(ctx.request.body);
     data.users_permissions_user = userId;
 
+    const rawGroupIds = Array.isArray(data.groupIds) ? data.groupIds : data.groupIds ? [data.groupIds] : [];
+    const groupIds = rawGroupIds.map(Number).filter((id: number) => Number.isInteger(id) && id > 0);
+    delete data.groupIds;
+    delete data._has_groupIds;
+
     const project = await strapi.documents('api::project.project').create({
       data,
       status: 'published',
       populate: { tasks: true },
     });
+
+    if (groupIds.length) {
+      const projectRow = await strapi.db.query('api::project.project').findOne({
+        where: { documentId: project.documentId },
+        select: ['id'],
+      });
+      for (const gid of groupIds) {
+        await strapi.db.query('api::group.group').update({
+          where: { id: gid },
+          data: { projects: { connect: [{ id: projectRow.id }] } },
+        });
+      }
+    }
 
     if (!isHtmx(ctx)) return { data: project };
     ctx.type = 'html';
@@ -147,41 +154,38 @@ export default factories.createCoreController('api::project.project', ({ strapi 
       return ctx.forbidden('You do not have access to this project.');
     }
 
-    const rawBody = ctx.request.body?.data ?? ctx.request.body ?? {};
-    const hasTeamField = Object.prototype.hasOwnProperty.call(rawBody, 'team_members')
-      || Object.prototype.hasOwnProperty.call(rawBody, '_has_team_members');
-    const rawTeamMembers = rawBody.team_members;
-
-    let memberIds: number[] = [];
-    if (hasTeamField) {
-      memberIds = normalizeTeamMemberIds(rawTeamMembers);
-      const employeeCount = await strapi.db.query('plugin::users-permissions.user').count({
-        where: { id: { $in: memberIds }, role: { type: ROLE_EMPLOYEE } },
-      });
-      if (employeeCount !== memberIds.length) {
-        return ctx.forbidden('Projects can only include Employees as team members.');
-      }
-      if (getRoleType(ctx) === ROLE_TEAM_LEAD) {
-        const managedIds = await getManagedEmployeeIds(strapi, getUserId(ctx) as number);
-        if (memberIds.some((memberId) => !managedIds.includes(memberId))) {
-          return ctx.forbidden('You can only assign Employees within your team scope.');
-        }
-      }
-    }
-
     const data = toData(ctx.request.body);
-    delete data.team_members;
-    delete data._has_team_members;
-    ctx.request.body = { data };
+    const hasGroupField = data._has_groupIds === '1' || data._has_groupIds === 1;
+    const rawGroupIds = Array.isArray(data.groupIds) ? data.groupIds : data.groupIds ? [data.groupIds] : [];
+    const groupIds = rawGroupIds.map(Number).filter((id: number) => Number.isInteger(id) && id > 0);
+    delete data.groupIds;
+    delete data._has_groupIds;
 
+    ctx.request.body = { data };
     const res = await super.update(ctx);
 
-    if (hasTeamField) {
-      await strapi.documents('api::project.project').update({
-        documentId: id,
-        data: { team_members: memberIds },
-        status: 'published',
+    if (hasGroupField) {
+      const projectRow = await strapi.db.query('api::project.project').findOne({
+        where: { documentId: id },
+        populate: ['groups'],
       });
+      const projectNumericId = projectRow?.id;
+      const oldGroupIds = (projectRow?.groups || []).map((g: any) => g.id);
+      const connectGroupIds = groupIds.filter((gid: number) => !oldGroupIds.includes(gid));
+      const disconnectGroupIds = oldGroupIds.filter((gid: number) => !groupIds.includes(gid));
+
+      for (const gid of connectGroupIds) {
+        await strapi.db.query('api::group.group').update({
+          where: { id: gid },
+          data: { projects: { connect: [{ id: projectNumericId }] } },
+        });
+      }
+      for (const gid of disconnectGroupIds) {
+        await strapi.db.query('api::group.group').update({
+          where: { id: gid },
+          data: { projects: { disconnect: [{ id: projectNumericId }] } },
+        });
+      }
     }
 
     if (!isHtmx(ctx)) return res;
@@ -205,6 +209,40 @@ export default factories.createCoreController('api::project.project', ({ strapi 
    * Returns the project edit modal HTML with pre-filled values and
    * team-member checkboxes. Owner/Team Lead only.
    */
+  async createForm(ctx) {
+    const role = getRoleType(ctx);
+    if (role !== ROLE_OWNER && role !== ROLE_TEAM_LEAD) {
+      return ctx.forbidden();
+    }
+    const allGroups = await strapi.db.query('api::group.group').findMany({
+      where: { publishedAt: { $ne: null } },
+      select: ['id', 'name'],
+      orderBy: { name: 'asc' },
+    });
+    ctx.type = 'html';
+    ctx.body = renderProjectCreateForm(allGroups);
+  },
+
+  async groupCheckboxes(ctx) {
+    const role = getRoleType(ctx);
+    if (role !== ROLE_OWNER && role !== ROLE_TEAM_LEAD) {
+      return ctx.forbidden();
+    }
+    const allGroups = await strapi.db.query('api::group.group').findMany({
+      where: { publishedAt: { $ne: null } },
+      select: ['id', 'name'],
+      orderBy: { name: 'asc' },
+    });
+    const { esc } = require('../../../utils/html');
+    const html = allGroups.length
+      ? allGroups.map((g: any) =>
+        `<label><input type="checkbox" name="groupIds" value="${g.id}" /> ${esc(g.name)}</label>`
+      ).join('\n')
+      : '<p class="form-hint">No groups available.</p>';
+    ctx.type = 'html';
+    ctx.body = html;
+  },
+
   async editForm(ctx) {
     const { id } = ctx.params;
     if (!(await canManageProject(strapi, ctx, id))) {
@@ -217,24 +255,17 @@ export default factories.createCoreController('api::project.project', ({ strapi 
     });
     if (!project) return ctx.notFound();
 
-    const row = await strapi.db.query('api::project.project').findOne({
-      where: { id: project.id },
-      populate: { team_members: { select: ['id', 'username'] } },
+    const allGroups = await strapi.db.query('api::group.group').findMany({
+      where: { publishedAt: { $ne: null } },
+      select: ['id', 'name'],
+      orderBy: { name: 'asc' },
     });
-    const currentMemberIds = (row?.team_members || []).map((u: any) => u.id);
-
-    const employeeIds = getRoleType(ctx) === ROLE_TEAM_LEAD
-      ? await getManagedEmployeeIds(strapi, getUserId(ctx) as number)
-      : undefined;
-    const employees = await strapi.db.query('plugin::users-permissions.user').findMany({
-      where: {
-        role: { type: ROLE_EMPLOYEE },
-        ...(employeeIds ? { id: { $in: employeeIds } } : {}),
-      },
-      orderBy: { username: 'asc' },
+    const projectRow = await strapi.db.query('api::project.project').findOne({
+      where: { documentId: id },
+      populate: ['groups'],
     });
-
+    const currentGroupIds = (projectRow?.groups || []).map((g: any) => g.id);
     ctx.type = 'html';
-    ctx.body = renderProjectEditForm(project, employees, currentMemberIds);
+    ctx.body = renderProjectEditForm(project, allGroups, currentGroupIds);
   },
 }));

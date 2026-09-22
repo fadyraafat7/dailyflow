@@ -36,11 +36,11 @@
       "target": "plugin::users-permissions.user",
       "inversedBy": "projects"
     },
-    "team_members": {
+    "groups": {
       "type": "relation",
       "relation": "manyToMany",
-      "target": "plugin::users-permissions.user",
-      "inversedBy": "team_projects"
+      "target": "api::group.group",
+      "mappedBy": "projects"
     }
   }
 }

@@ -286,18 +286,28 @@
         <!-- Time entry modal -->
         <template x-if="timeEntryModalOpen">
             <div class="modal" @click.self="timeEntryModalOpen = false; timeEntryTask = null">
-                <form class="task-edit" hx-post="/api/time-entries" hx-swap="none"
-                      x-init="htmx.process($el)"
-                      @htmx:after-request="timeEntryModalOpen = false; timeEntryTask = null; $el.reset(); $dispatch('refresh-tasks')">
+                <div class="task-edit" x-init="htmx.process($el)">
                     <h3>Track time — <span x-text="timeEntryTask?.title"></span></h3>
-                    <input type="datetime-local" name="startedAt" class="form-control" required />
-                    <input type="datetime-local" name="stoppedAt" class="form-control" required />
-                    <input type="hidden" name="task" :value="timeEntryTask?.id" />
-                    <div class="task-edit__actions">
-                        <button type="submit">Add</button>
-                        <button type="button" class="btn-ghost" @click="timeEntryModalOpen = false; timeEntryTask = null">Cancel</button>
+
+                    <div id="time-entry-list"
+                         x-init="htmx.ajax('GET', '/api/time-entries/by-task/' + timeEntryTask?.id, {target: $el, swap: 'outerHTML'})">
+                        <p class="form-hint">Loading...</p>
                     </div>
-                </form>
+
+                    <hr style="border-color: var(--border); margin: 1rem 0;" />
+                    <h4 style="margin: 0 0 0.5rem;">Add new entry</h4>
+                    <form hx-post="/api/time-entries" hx-swap="none"
+                          x-init="htmx.process($el)"
+                          @htmx:after-request="if($event.detail.successful){$el.reset();htmx.ajax('GET','/api/time-entries/by-task/'+timeEntryTask?.id,{target:'#time-entry-list',swap:'outerHTML'});$dispatch('refresh-tasks')}">
+                        <input type="datetime-local" name="startedAt" class="form-control" required />
+                        <input type="datetime-local" name="stoppedAt" class="form-control" required />
+                        <input type="hidden" name="task" :value="timeEntryTask?.id" />
+                        <div class="task-edit__actions">
+                            <button type="submit">Add</button>
+                            <button type="button" class="btn-ghost" @click="timeEntryModalOpen = false; timeEntryTask = null">Close</button>
+                        </div>
+                    </form>
+                </div>
             </div>
         </template>
 
