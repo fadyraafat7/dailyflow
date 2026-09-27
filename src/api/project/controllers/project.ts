@@ -22,7 +22,7 @@ import {
 } from '../../../utils/access';
 
 /** Projects per page when a request doesn't specify its own pagination. */
-const DEFAULT_PAGE_SIZE = 3;
+const DEFAULT_PAGE_SIZE = 4;
 
 function toData(body: any) {
   const data = body?.data ?? body ?? {};

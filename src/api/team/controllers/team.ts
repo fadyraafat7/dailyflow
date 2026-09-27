@@ -27,7 +27,7 @@ import {
   ROLE_TEAM_LEAD,
   ROLE_EMPLOYEE,
 } from '../../../utils/access';
-import { renderTeamMembersList, renderTeamModal } from '../../../renderers/team';
+import { renderTeamMembersList, renderTeamModal, renderTeamPage, renderTeamCreateForm, renderResetPasswordForm } from '../../../renderers/team';
 
 function sanitize(user: any) {
   return {
@@ -94,7 +94,17 @@ export default ({ strapi }: { strapi: any }) => ({
     });
 
     ctx.type = 'html';
-    ctx.body = renderTeamModal(users.map(sanitize), role as string, projects, groups);
+    if (ctx.query.view === 'page') {
+      ctx.body = renderTeamPage(users.map(sanitize), role as string);
+    } else if (ctx.query.view === 'create-form') {
+      ctx.body = renderTeamCreateForm(role as string, groups);
+    } else if (ctx.query.view === 'reset-form') {
+      const memberId = Number(ctx.query.memberId);
+      const memberName = String(ctx.query.memberName || '');
+      ctx.body = renderResetPasswordForm({ id: memberId, username: memberName });
+    } else {
+      ctx.body = renderTeamModal(users.map(sanitize), role as string, projects, groups);
+    }
   },
 
   /**
@@ -313,21 +323,25 @@ export default ({ strapi }: { strapi: any }) => ({
         });
       }
     }
-    const userGroups = await strapi.db.query('api::group.group').findMany({
-      where: { users_permissions_users: targetId, publishedAt: { $ne: null } },
-      select: ['id', 'documentId'],
-    });
-    for (const group of userGroups) {
-      await strapi.documents('api::group.group').update({
-        documentId: group.documentId,
-        data: { users_permissions_users: { disconnect: [targetId] } },
-        status: 'published',
+    try {
+      const userGroups = await strapi.db.query('api::group.group').findMany({
+        where: { users_permissions_users: { id: targetId }, publishedAt: { $ne: null } },
+        select: ['id', 'documentId'],
       });
-    }
-    await strapi.db.query('api::task.task').updateMany({
-      where: { users_permissions_user: targetId },
-      data: { users_permissions_user: null },
-    });
+      for (const group of userGroups) {
+        await strapi.documents('api::group.group').update({
+          documentId: group.documentId,
+          data: { users_permissions_users: { disconnect: [targetId] } },
+          status: 'published',
+        });
+      }
+    } catch (_) {}
+    try {
+      await strapi.db.query('api::task.task').updateMany({
+        where: { users_permissions_user: targetId },
+        data: { users_permissions_user: null },
+      });
+    } catch (_) {}
     await strapi.db.query('plugin::users-permissions.user').delete({ where: { id: targetId } });
 
     if (!isHtmx(ctx)) {

@@ -1,5 +1,5 @@
 import { getRoleType, getUserId, ROLE_OWNER, ROLE_TEAM_LEAD, ROLE_EMPLOYEE } from '../../../utils/access';
-import { renderGroupModal, renderGroupList, renderGroupEditForm } from '../../../renderers/group';
+import { renderGroupModal, renderGroupList, renderGroupEditForm, renderGroupPage, renderGroupCreateForm } from '../../../renderers/group';
 
 async function getAllUsers(strapi: any, role: string, userId: number | null) {
   const where = role === ROLE_OWNER
@@ -66,7 +66,13 @@ export default ({ strapi }: { strapi: any }) => ({
       getAllProjects(strapi, role, userId),
     ]);
     ctx.type = 'html';
-    ctx.body = renderGroupModal(groups.map(normalizeGroup), role, users, projects);
+    if (ctx.query.view === 'page') {
+      ctx.body = renderGroupPage(groups.map(normalizeGroup), role);
+    } else if (ctx.query.view === 'create-form') {
+      ctx.body = renderGroupCreateForm(users, projects);
+    } else {
+      ctx.body = renderGroupModal(groups.map(normalizeGroup), role, users, projects);
+    }
   },
 
   async list(ctx: any) {

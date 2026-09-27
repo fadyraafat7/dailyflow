@@ -43,7 +43,6 @@ export function renderTaskCard(task: any, role = ""): string {
     (total: number, timeEntry: any) => total + durationInMinutes(timeEntry),
     0,
   );
-  const runningBadge = runningEntry ? `<span class="badge state--running">running</span> ` : "";
   const creatorUsername = task.users_permissions_user?.username;
   const addedBy = creatorUsername
     ? `<span class="task-card__added-by">Added by ${esc(creatorUsername)}</span>`
@@ -52,24 +51,24 @@ export function renderTaskCard(task: any, role = ""): string {
   const assignedTo = assignedUsername
     ? `<span class="badge state--active">👤 ${esc(assignedUsername)}</span>`
     : "";
-  const timeSummary = `<div class="task-card__time">${
-    runningEntry && !completedCount
-      ? `<div class="task-card__total">${runningBadge}</div>`
-      : timeEntries.length
-        ? `<div class="task-card__total">${runningBadge}Duration: <strong>${formatDuration(totalMinutes)}</strong></div>`
-        : '<span class="task-card__no-time">No time entries</span>'
-  }</div>`;
+
+  let timeSummary: string;
+  if (runningEntry) {
+    const startIso = esc(runningEntry.startedAt);
+    const timerId = `timer-${esc(runningEntry.documentId)}`;
+    timeSummary = `<div class="task-card__time"><div class="task-card__total"><span class="badge state--running">running</span> <span id="${timerId}" data-start="${startIso}">00:00:00</span>${completedCount ? ` + ${formatDuration(totalMinutes)}` : ''}</div></div>
+<script>(function(){var el=document.getElementById('${timerId}');if(!el)return;var start=new Date('${startIso}').getTime();function tick(){var d=Date.now()-start;if(d<0)d=0;var h=Math.floor(d/3600000);var m=Math.floor((d%3600000)/60000);var s=Math.floor((d%60000)/1000);el.textContent=(h<10?'0':'')+h+':'+(m<10?'0':'')+m+':'+(s<10?'0':'')+s}tick();var iv=setInterval(tick,1000);el._iv=iv;new MutationObserver(function(){if(!document.contains(el))clearInterval(iv)}).observe(el.parentNode,{childList:true})})()</script>`;
+  } else if (timeEntries.length) {
+    timeSummary = `<div class="task-card__time"><div class="task-card__total">Duration: <strong>${formatDuration(totalMinutes)}</strong></div></div>`;
+  } else {
+    timeSummary = `<div class="task-card__time"><span class="task-card__no-time">No time entries</span></div>`;
+  }
 
   const timerControls = runningEntry
     ? `<button type="button" class="btn-icon" title="Stop timer"
-        hx-put="/api/time-entries/${esc(runningEntry.documentId)}/stop"
-        hx-swap="none"
-        @htmx:after-request="$dispatch('refresh-tasks')">⏹</button>`
+        onclick="window._stopTimer('${esc(runningEntry.documentId)}')">⏹</button>`
     : `<button type="button" class="btn-icon" title="Start timer"
-        hx-post="/api/time-entries"
-        hx-vals='js:{"data": {"task": "${id}", "startedAt": new Date().toISOString()}}'
-        hx-swap="none"
-        @htmx:after-request="$dispatch('refresh-tasks')">▶</button>`;
+        onclick="window._startTimer('${id}')">▶</button>`;
 
   return renderView("task/card", {
     id,

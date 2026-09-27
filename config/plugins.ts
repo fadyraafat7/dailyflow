@@ -29,6 +29,12 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
       sessions: {
         httpOnly: true,
       },
+      // Disable rate limiting in test so repeated logins across test files
+      // don't trigger 429s (the limit is per-IP and resets on server restart
+      // but not between test suites within the same run).
+      rateLimit: {
+        enabled: env('NODE_ENV') !== 'test',
+      },
     },
   },
   upload: {

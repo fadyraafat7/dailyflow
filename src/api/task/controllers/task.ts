@@ -196,11 +196,24 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
     };
     const res = await super.find(ctx);
     await attachCreators(strapi, res.data ?? []);
+
+    const tasks = res.data ?? [];
+    const incomingSort = typeof ctx.query.sort === 'string' ? ctx.query.sort : '';
+    if (!incomingSort) {
+      tasks.sort((a: any, b: any) => {
+        const latestEntry = (t: any) => {
+          const entries = t.time_entries ?? [];
+          if (!entries.length) return 0;
+          return Math.max(...entries.map((e: any) => new Date(e.updatedAt || e.startedAt || 0).getTime()));
+        };
+        return latestEntry(b) - latestEntry(a);
+      });
+    }
+
     if (!isHtmx(ctx)) return res;
     ctx.type = 'html';
 
-    const sort = typeof ctx.query.sort === 'string' ? ctx.query.sort : '';
-    let html = renderTaskCards(res.data ?? [], role || '', sort);
+    let html = renderTaskCards(tasks, role || '', incomingSort);
 
     const meta = (res as any).meta?.pagination;
     if (meta) {

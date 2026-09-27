@@ -23,13 +23,23 @@ import {
 function toData(body: any) {
 	const data = body?.data ?? body ?? {};
 	for (const key of Object.keys(data)) if (data[key] === '') delete data[key];
-	if (data.duration === undefined && data.startedAt && data.stoppedAt) {
-		const startedAt = new Date(data.startedAt).getTime();
-		const stoppedAt = new Date(data.stoppedAt).getTime();
-		if (Number.isFinite(startedAt) && Number.isFinite(stoppedAt) && stoppedAt >= startedAt) {
-			data.duration = Math.round((stoppedAt - startedAt) / 60000);
-		}
+
+	const hasStart = data.startedAt && Number.isFinite(new Date(data.startedAt).getTime());
+	const hasStop = data.stoppedAt && Number.isFinite(new Date(data.stoppedAt).getTime());
+	const hasDur = data.duration !== undefined && Number.isFinite(Number(data.duration)) && Number(data.duration) > 0;
+
+	if (hasStart && hasStop && !hasDur) {
+		const diff = Math.round((new Date(data.stoppedAt).getTime() - new Date(data.startedAt).getTime()) / 60000);
+		if (diff >= 0) data.duration = diff;
+	} else if (hasStart && hasDur && !hasStop) {
+		data.stoppedAt = new Date(new Date(data.startedAt).getTime() + Number(data.duration) * 60000).toISOString();
+	} else if (hasStop && hasDur && !hasStart) {
+		data.startedAt = new Date(new Date(data.stoppedAt).getTime() - Number(data.duration) * 60000).toISOString();
+	} else if (hasStart && hasStop && hasDur) {
+		data.duration = Math.round((new Date(data.stoppedAt).getTime() - new Date(data.startedAt).getTime()) / 60000);
 	}
+
+	if (data.duration !== undefined) data.duration = Number(data.duration);
 	return data;
 }
 
@@ -94,6 +104,10 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 		const data = toData(ctx.request.body);
 		ctx.request.body = { data };
 
+		if (data.startedAt && data.stoppedAt && new Date(data.stoppedAt) < new Date(data.startedAt)) {
+			return ctx.badRequest('Stopped at must be after Started at.');
+		}
+
 		const taskDocId = typeof data.task === 'string' ? data.task : null;
 		if (!taskDocId) return ctx.badRequest('A task is required.');
 
@@ -118,7 +132,11 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 			return ctx.forbidden('You do not have access to this time entry.');
 		}
 
-		ctx.request.body = { data: toData(ctx.request.body) };
+		const updateData = toData(ctx.request.body);
+		if (updateData.startedAt && updateData.stoppedAt && new Date(updateData.stoppedAt) < new Date(updateData.startedAt)) {
+			return ctx.badRequest('Stopped at must be after Started at.');
+		}
+		ctx.request.body = { data: updateData };
 		const res = await super.update(ctx);
 		if (!isHtmx(ctx)) return res;
 		ctx.type = 'html';
@@ -184,6 +202,7 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 		const updated = await strapi.documents('api::time-entry.time-entry').update({
 			documentId: id,
 			data: { stoppedAt, duration },
+			status: 'published',
 		});
 
 		if (!isHtmx(ctx)) return { data: updated };

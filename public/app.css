@@ -465,6 +465,41 @@ input:focus, select:focus, textarea:focus {
   text-align: left;
 }
 
+/* ---------- Password toggle ---------- */
+.pw-field {
+  position: relative;
+  width: 100%;
+}
+.pw-field .form-control {
+  width: 100%;
+  padding-right: 2.6rem;
+}
+.pw-toggle {
+  position: absolute;
+  right: .45rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  box-shadow: none;
+  color: var(--text-faint);
+  padding: .3rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+}
+.pw-toggle:hover {
+  color: var(--text-muted);
+  background: var(--bg-soft);
+  box-shadow: none;
+  filter: none;
+  transform: translateY(-50%);
+}
+.pw-toggle svg { width: 1.1rem; height: 1.1rem; pointer-events: none; }
+
 /* ---------- Team management ---------- */
 .team-list { display: flex; flex-direction: column; gap: .5rem; max-height: 260px; overflow-y: auto; }
 .team-member-row {
