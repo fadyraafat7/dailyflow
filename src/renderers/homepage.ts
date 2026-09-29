@@ -113,6 +113,7 @@ function groupTasksByProject(tasks: any[]): Map<string, { project: any; tasks: a
 }
 
 function renderTaskRow(task: any, role: string): string {
+  const docId = esc(task.documentId);
   const state = esc(task.state || 'pending');
   const priority = esc(task.priority || 'low');
   const title = esc(toTitleCase(task.title || ''));
@@ -129,12 +130,33 @@ function renderTaskRow(task: any, role: string): string {
       ? `<span class="hp-duration">${esc(formatDuration(totalMinutes))}</span>`
       : `<span class="hp-no-time">—</span>`;
 
-  return `<tr class="hp-task-row" data-id="${esc(task.documentId)}">
+  const prioritySort = task.priority === 'high' ? '2' : '1';
+  const stateOrder: Record<string, string> = { pending: '1', active: '2', paused: '3', completed: '4' };
+  const stateSort = stateOrder[task.state || 'pending'] || '1';
+
+  const canDelete = role === 'owner' || role === 'team_lead';
+  const actionBtns = `
+    <button type="button" class="btn-ghost btn-xs"
+      onclick="window._hpEditTask(this)"
+      data-id="${docId}"
+      data-title="${esc(task.title || '')}"
+      data-priority="${esc(task.priority || 'low')}"
+      data-state="${esc(task.state || 'pending')}"
+      data-assigned-to="${esc(String(task.assigned_to?.id || ''))}">Edit</button>
+    ${canDelete ? `<button type="button" class="btn-ghost btn-xs hp-btn-delete"
+      onclick="window._hpDeleteTask('${docId}')">Delete</button>` : ''}`;
+
+  return `<tr class="hp-task-row"
+    data-sort-task="${esc(task.title || '')}"
+    data-sort-priority="${prioritySort}"
+    data-sort-state="${stateSort}"
+    data-sort-time="${totalMinutes}">
     <td class="hp-task-row__title">${title}</td>
     <td><span class="badge priority--${priority}">${priority}</span></td>
     <td><span class="badge state--${state}">${state}</span></td>
     <td>${timeHtml}</td>
     <td>${assignedTo}${addedBy}</td>
+    <td class="hp-task-row__actions">${actionBtns}</td>
   </tr>`;
 }
 
@@ -165,11 +187,12 @@ export function renderHomepage(opts: {
           <table class="hp-tasks-table">
             <thead>
               <tr>
-                <th>Task</th>
-                <th>Priority</th>
-                <th>State</th>
-                <th>Time</th>
+                <th data-col="task" onclick="window._hpSortTable(this)" style="cursor:pointer;user-select:none">Task <span class="hp-sort-ind">⇅</span></th>
+                <th data-col="priority" onclick="window._hpSortTable(this)" style="cursor:pointer;user-select:none">Priority <span class="hp-sort-ind">⇅</span></th>
+                <th data-col="state" onclick="window._hpSortTable(this)" style="cursor:pointer;user-select:none">State <span class="hp-sort-ind">⇅</span></th>
+                <th data-col="time" onclick="window._hpSortTable(this)" style="cursor:pointer;user-select:none">Time <span class="hp-sort-ind">⇅</span></th>
                 <th>Assigned</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>

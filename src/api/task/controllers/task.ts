@@ -366,10 +366,8 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
     const { id } = ctx.params;
     const projectDocId = await getTaskProjectDocId(strapi, id);
     const role = getRoleType(ctx);
-    const hasAccess = role === ROLE_EMPLOYEE
-      ? await canAccessProject(strapi, ctx, projectDocId || '')
-      : await canManageProject(strapi, ctx, projectDocId || '');
-    if (!hasAccess) {
+    const hasAccess = await canAccessProject(strapi, ctx, projectDocId || '');
+    if (!hasAccess || role === ROLE_EMPLOYEE) {
       return ctx.forbidden('You do not have access to this task.');
     }
 
