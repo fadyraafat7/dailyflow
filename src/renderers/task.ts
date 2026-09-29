@@ -76,7 +76,9 @@ window._stopTimerWithComment=window._stopTimerWithComment||function(eId,tId){var
     ? `<button type="button" class="btn-icon" title="Stop timer"
         onclick="window._stopTimerWithComment('${esc(runningEntry.documentId)}','${id}')">⏹</button>`
     : `<button type="button" class="btn-icon" title="Start timer"
-        onclick="window._startTimer('${id}')">▶</button>`;
+        hx-post="/api/time-entries"
+        hx-swap="none"
+        hx-vals='js:{"task":"${id}","startedAt":new Date().toISOString()}'>▶</button>`;
 
   return renderView("task/card", {
     id,
