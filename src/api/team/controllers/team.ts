@@ -17,11 +17,10 @@
  * directly.
  */
 
-import { isHtmx } from '../../../utils/html';
+import { isHtmx, toTitleCase } from '../../../utils/html';
 import {
   getRoleType,
   getUserId,
-  getManagedEmployeeIds,
   isManagedEmployee,
   ROLE_OWNER,
   ROLE_TEAM_LEAD,
@@ -51,12 +50,7 @@ export default ({ strapi }: { strapi: any }) => ({
       return ctx.forbidden('Only Owners and Team Leads can view the team.');
     }
 
-    const managedIds = role === ROLE_TEAM_LEAD
-      ? await getManagedEmployeeIds(strapi, getUserId(ctx) as number)
-      : undefined;
-    const where = role === ROLE_TEAM_LEAD
-      ? { id: { $in: managedIds }, role: { type: ROLE_EMPLOYEE } }
-      : { role: { type: { $in: [ROLE_TEAM_LEAD, ROLE_EMPLOYEE] } } };
+    const where = { role: { type: { $in: [ROLE_TEAM_LEAD, ROLE_EMPLOYEE] } }, blocked: { $ne: true } };
     const users = await strapi.db.query('plugin::users-permissions.user').findMany({
       where,
       populate: { role: true },
@@ -118,12 +112,7 @@ export default ({ strapi }: { strapi: any }) => ({
       return ctx.forbidden('Only Owners and Team Leads can view the team.');
     }
 
-    const managedIds = role === ROLE_TEAM_LEAD
-      ? await getManagedEmployeeIds(strapi, getUserId(ctx) as number)
-      : undefined;
-    const where = role === ROLE_TEAM_LEAD
-      ? { id: { $in: managedIds }, role: { type: ROLE_EMPLOYEE } }
-      : { role: { type: { $in: [ROLE_TEAM_LEAD, ROLE_EMPLOYEE] } } };
+    const where = { role: { type: { $in: [ROLE_TEAM_LEAD, ROLE_EMPLOYEE] } }, blocked: { $ne: true } };
     const users = await strapi.db.query('plugin::users-permissions.user').findMany({
       where,
       populate: { role: true },
@@ -153,7 +142,7 @@ export default ({ strapi }: { strapi: any }) => ({
     }
 
     const body = ctx.request.body?.data ?? ctx.request.body ?? {};
-    const username = String(body.username || '').trim();
+    const username = toTitleCase(String(body.username || '').trim());
     const email = String(body.email || '').trim();
     const roleType = role === ROLE_TEAM_LEAD ? ROLE_EMPLOYEE : body.roleType;
     const providedPassword = typeof body.password === 'string' ? body.password.trim() : '';
@@ -298,11 +287,11 @@ export default ({ strapi }: { strapi: any }) => ({
     });
     if (!target) return ctx.notFound('User not found.');
     const targetRole = target.role?.type;
-    if (targetRole === ROLE_OWNER || (role === ROLE_TEAM_LEAD && targetRole !== ROLE_EMPLOYEE)) {
-      return ctx.forbidden('You do not have permission to delete this user.');
+    if (targetRole === ROLE_OWNER) {
+      return ctx.forbidden('You do not have permission to deactivate this user.');
     }
-    if (role === ROLE_TEAM_LEAD && !(await isManagedEmployee(strapi, callerId as number, targetId))) {
-      return ctx.forbidden('You can only delete Employees on your own projects.');
+    if (role === ROLE_TEAM_LEAD && targetRole !== ROLE_EMPLOYEE) {
+      return ctx.forbidden('Team Leads can only deactivate Employees.');
     }
 
     const owner = role === ROLE_OWNER
@@ -323,26 +312,7 @@ export default ({ strapi }: { strapi: any }) => ({
         });
       }
     }
-    try {
-      const userGroups = await strapi.db.query('api::group.group').findMany({
-        where: { users_permissions_users: { id: targetId }, publishedAt: { $ne: null } },
-        select: ['id', 'documentId'],
-      });
-      for (const group of userGroups) {
-        await strapi.documents('api::group.group').update({
-          documentId: group.documentId,
-          data: { users_permissions_users: { disconnect: [targetId] } },
-          status: 'published',
-        });
-      }
-    } catch (_) {}
-    try {
-      await strapi.db.query('api::task.task').updateMany({
-        where: { users_permissions_user: targetId },
-        data: { users_permissions_user: null },
-      });
-    } catch (_) {}
-    await strapi.db.query('plugin::users-permissions.user').delete({ where: { id: targetId } });
+    await strapi.plugin('users-permissions').service('user').edit(target.id, { blocked: true });
 
     if (!isHtmx(ctx)) {
       ctx.body = { data: { id: targetId } };

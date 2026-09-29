@@ -1,4 +1,4 @@
-import { esc } from '../utils/html';
+import { esc, toTitleCase, renderMultiSelect } from '../utils/html';
 
 export function renderGroupPage(groups: any[], callerRole: string): string {
 
@@ -7,12 +7,12 @@ export function renderGroupPage(groups: any[], callerRole: string): string {
 }
 
 export function renderGroupCreateForm(allUsers: any[], allProjects: any[]): string {
-  const userCheckboxes = allUsers.map((u: any) =>
-    `<label><input type="checkbox" name="memberIds" value="${u.id}" /> ${esc(u.username)} <span class="badge">${esc(u.role?.name || 'user')}</span></label>`
+  const userOptions = allUsers.map((u: any) =>
+    `<option value="${u.id}">${esc(u.username)} (${esc(u.role?.name || 'user')})</option>`
   ).join('');
 
-  const projectCheckboxes = allProjects.map((p: any) =>
-    `<label><input type="checkbox" name="projectIds" value="${p.id}" /> ${esc(p.name)}${p.state ? ` · ${esc(p.state)}` : ''}</label>`
+  const projectOptions = allProjects.map((p: any) =>
+    `<option value="${p.id}">${esc(p.name)}${p.state ? ` · ${esc(p.state)}` : ''}</option>`
   ).join('');
 
   return `<div class="modal" id="group-create-modal-wrap" onclick="if(event.target===this)this.remove()">
@@ -22,11 +22,11 @@ export function renderGroupCreateForm(allUsers: any[], allProjects: any[]): stri
     <input type="text" name="name" class="form-control" placeholder="Group name" required />
     <div>
       <label class="url-import__label">Members</label>
-      <div class="checkbox-list">${userCheckboxes}</div>
+      ${renderMultiSelect('memberIds', allUsers.map((u: any) => ({ value: u.id, label: `${u.username} (${u.role?.name || 'user'})` })), 'Select members...')}
     </div>
     <div>
       <label class="url-import__label">Projects</label>
-      <div class="checkbox-list">${projectCheckboxes}</div>
+      ${renderMultiSelect('projectIds', allProjects.map((p: any) => ({ value: p.id, label: p.name + (p.state ? ` · ${p.state}` : '') })), 'Select projects...')}
     </div>
     <div class="task-edit__actions">
       <button type="submit">Create</button>
@@ -39,8 +39,12 @@ export function renderGroupCreateForm(allUsers: any[], allProjects: any[]): stri
 export function renderGroupRow(group: any, callerRole: string): string {
   const memberCount = group.members?.length || 0;
   const projectCount = group.projects?.length || 0;
-  const memberNames = (group.members || []).map((m: any) => esc(m.username)).join(', ') || 'No members';
-  const projectNames = (group.projects || []).map((p: any) => esc(p.name)).join(', ') || 'No projects';
+  const memberNames = (group.members || []).map((m: any) => esc(toTitleCase(m.username || ''))).join(', ') || 'No members';
+  const projectLinks = (group.projects || []).map((p: any) =>
+    p.documentId
+      ? `<a href="#" class="task-card__project-link" data-project-id="${esc(p.documentId)}" data-project-name="${esc(p.name)}" onclick="event.preventDefault();(function(el){if(window.Alpine){var d=window.Alpine.$data(document.body);d.selected={id:el.dataset.projectId,name:el.dataset.projectName,count:0};if(d.navigate)d.navigate('tasks');location.hash='tasks';setTimeout(function(){document.body.dispatchEvent(new CustomEvent('load-tasks',{bubbles:true}));},80);}else{var c=Array.prototype.find.call(document.querySelectorAll('.project-card'),function(x){return x.dataset.id===el.dataset.projectId});if(c)c.click();}})(this)">${esc(p.name)}</a>`
+      : esc(p.name)
+  ).join(', ') || 'No projects';
 
   const canManage = callerRole === 'owner' || callerRole === 'team_lead';
 
@@ -63,7 +67,7 @@ export function renderGroupRow(group: any, callerRole: string): string {
       <span class="badge">${projectCount} project${projectCount !== 1 ? 's' : ''}</span>
     </div>
     <span class="group-row__members">${memberNames}</span>
-    <span class="group-row__projects">${projectNames}</span>
+    <span class="group-row__projects">${projectLinks}</span>
   </div>
   <div class="task-card__actions">
     ${editButton}${deleteButton}
@@ -79,12 +83,12 @@ export function renderGroupList(groups: any[], callerRole: string): string {
 export function renderGroupModal(groups: any[], callerRole: string, allUsers: any[], allProjects: any[]): string {
   const canManage = callerRole === 'owner' || callerRole === 'team_lead';
 
-  const userCheckboxes = allUsers.map((u: any) =>
-    `<label><input type="checkbox" name="memberIds" value="${u.id}" /> ${esc(u.username)} <span class="badge">${esc(u.role?.name || 'user')}</span></label>`
+  const userOpts = allUsers.map((u: any) =>
+    `<option value="${u.id}">${esc(u.username)} (${esc(u.role?.name || 'user')})</option>`
   ).join('');
 
-  const projectCheckboxes = allProjects.map((p: any) =>
-    `<label><input type="checkbox" name="projectIds" value="${p.id}" /> ${esc(p.name)}${p.state ? ` · ${esc(p.state)}` : ''}</label>`
+  const projectOpts = allProjects.map((p: any) =>
+    `<option value="${p.id}">${esc(p.name)}${p.state ? ` · ${esc(p.state)}` : ''}</option>`
   ).join('');
 
   const addForm = canManage ? `
@@ -95,11 +99,11 @@ export function renderGroupModal(groups: any[], callerRole: string, allUsers: an
         <input type="text" name="name" class="form-control" placeholder="Group name" required />
         <div>
           <label class="project-picker-label">Members</label>
-          <div class="checkbox-list">${userCheckboxes}</div>
+          ${renderMultiSelect('memberIds', allUsers.map((u: any) => ({ value: u.id, label: `${u.username} (${u.role?.name || 'user'})` })), 'Select members...')}
         </div>
         <div>
           <label class="project-picker-label">Projects</label>
-          <div class="checkbox-list">${projectCheckboxes}</div>
+          ${renderMultiSelect('projectIds', allProjects.map((p: any) => ({ value: p.id, label: p.name + (p.state ? ` · ${p.state}` : '') })), 'Select projects...')}
         </div>
         <div class="task-edit__actions">
           <button type="submit">Create</button>
@@ -122,12 +126,12 @@ export function renderGroupEditForm(group: any, allUsers: any[], allProjects: an
   const currentMemberIds = new Set((group.members || []).map((m: any) => m.id));
   const currentProjectIds = new Set((group.projects || []).map((p: any) => p.id));
 
-  const userCheckboxes = allUsers.map((u: any) =>
-    `<label><input type="checkbox" name="memberIds" value="${u.id}" ${currentMemberIds.has(u.id) ? 'checked' : ''} /> ${esc(u.username)} <span class="badge">${esc(u.role?.name || 'user')}</span></label>`
+  const userOptions = allUsers.map((u: any) =>
+    `<option value="${u.id}" ${currentMemberIds.has(u.id) ? 'selected' : ''}>${esc(u.username)} (${esc(u.role?.name || 'user')})</option>`
   ).join('');
 
-  const projectCheckboxes = allProjects.map((p: any) =>
-    `<label><input type="checkbox" name="projectIds" value="${p.id}" ${currentProjectIds.has(p.id) ? 'checked' : ''} /> ${esc(p.name)}${p.state ? ` · ${esc(p.state)}` : ''}</label>`
+  const projectOptions = allProjects.map((p: any) =>
+    `<option value="${p.id}" ${currentProjectIds.has(p.id) ? 'selected' : ''}>${esc(p.name)}${p.state ? ` · ${esc(p.state)}` : ''}</option>`
   ).join('');
 
   return `<div class="modal" id="group-edit-modal-wrap" onclick="if(event.target===this)this.remove()">
@@ -137,11 +141,11 @@ export function renderGroupEditForm(group: any, allUsers: any[], allProjects: an
     <input type="text" name="name" class="form-control" value="${esc(group.name)}" required />
     <div>
       <label class="url-import__label">Members</label>
-      <div class="checkbox-list">${userCheckboxes}</div>
+      ${renderMultiSelect('memberIds', allUsers.map((u: any) => ({ value: u.id, label: `${u.username} (${u.role?.name || 'user'})`, selected: currentMemberIds.has(u.id) })), 'Select members...')}
     </div>
     <div>
       <label class="url-import__label">Projects</label>
-      <div class="checkbox-list">${projectCheckboxes}</div>
+      ${renderMultiSelect('projectIds', allProjects.map((p: any) => ({ value: p.id, label: p.name + (p.state ? ` · ${p.state}` : ''), selected: currentProjectIds.has(p.id) })), 'Select projects...')}
     </div>
     <div class="task-edit__actions">
       <button type="submit">Save</button>

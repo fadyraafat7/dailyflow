@@ -114,6 +114,13 @@ const ACTION_MAP: { uid: string; actions: Record<string, RoleType[]> }[] = [
       deleteMember: ['owner', 'team_lead'],
     },
   },
+  {
+    uid: 'api::homepage.homepage',
+    actions: {
+      find: ['owner', 'team_lead', 'employee'],
+      sidebar: ['owner', 'team_lead', 'employee'],
+    },
+  },
 ];
 
 async function ensureRoles(strapi: Core.Strapi): Promise<Record<RoleType, any>> {

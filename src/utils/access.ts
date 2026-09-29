@@ -80,6 +80,7 @@ export async function canAccessProject(strapi: any, ctx: any, projectDocId: stri
     return !!project && assignedIds.includes(project.id);
   }
   if (role === ROLE_EMPLOYEE) {
+    if (await isProjectOwner(strapi, projectDocId, userId)) return true;
     if (await isProjectMember(strapi, projectDocId, userId)) return true;
     const assignedIds = await getAssignedProjectIds(strapi, userId);
     const project = await strapi.documents('api::project.project').findOne({ documentId: projectDocId });
@@ -93,7 +94,7 @@ export async function canManageProject(strapi: any, ctx: any, projectDocId: stri
   const userId = getUserId(ctx);
   if (!userId || !projectDocId) return false;
   if (role === ROLE_OWNER) return true;
-  if (role === ROLE_TEAM_LEAD) return isProjectOwner(strapi, projectDocId, userId);
+  if (role === ROLE_TEAM_LEAD || role === ROLE_EMPLOYEE) return isProjectOwner(strapi, projectDocId, userId);
   return false;
 }
 

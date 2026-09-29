@@ -1,4 +1,5 @@
 import { getRoleType, getUserId, ROLE_OWNER, ROLE_TEAM_LEAD, ROLE_EMPLOYEE } from '../../../utils/access';
+import { toTitleCase } from '../../../utils/html';
 import { renderGroupModal, renderGroupList, renderGroupEditForm, renderGroupPage, renderGroupCreateForm } from '../../../renderers/group';
 
 async function getAllUsers(strapi: any, role: string, userId: number | null) {
@@ -39,7 +40,7 @@ async function loadGroups(strapi: any) {
     where: { publishedAt: { $ne: null } },
     populate: {
       users_permissions_users: { select: ['id', 'username'], populate: { role: true } },
-      projects: { select: ['id', 'name', 'state'] },
+      projects: { where: { publishedAt: { $ne: null } }, select: ['id', 'documentId', 'name', 'state'] },
     },
     orderBy: { name: 'asc' },
   });
@@ -95,7 +96,7 @@ export default ({ strapi }: { strapi: any }) => ({
       documentId,
       populate: {
         users_permissions_users: { fields: ['id', 'username'], populate: { role: { fields: ['id', 'name'] } } },
-        projects: { fields: ['id', 'name', 'state'] },
+        projects: { where: { publishedAt: { $ne: null } }, fields: ['id', 'name', 'state'] },
       },
     });
     if (!group) return ctx.notFound('Group not found.');
@@ -114,7 +115,7 @@ export default ({ strapi }: { strapi: any }) => ({
       return ctx.forbidden();
     }
     const body = ctx.request.body?.data ?? ctx.request.body ?? {};
-    const name = String(body.name || '').trim();
+    const name = toTitleCase(String(body.name || '').trim());
     if (!name) return ctx.badRequest('Group name is required.');
 
     const rawMemberIds = Array.isArray(body.memberIds) ? body.memberIds : body.memberIds ? [body.memberIds] : [];
@@ -152,7 +153,7 @@ export default ({ strapi }: { strapi: any }) => ({
     if (!existing) return ctx.notFound('Group not found.');
 
     const body = ctx.request.body?.data ?? ctx.request.body ?? {};
-    const name = String(body.name || '').trim();
+    const name = toTitleCase(String(body.name || '').trim());
     if (!name) return ctx.badRequest('Group name is required.');
 
     const rawMemberIds = Array.isArray(body.memberIds) ? body.memberIds : body.memberIds ? [body.memberIds] : [];

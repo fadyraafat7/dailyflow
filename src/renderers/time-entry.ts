@@ -63,12 +63,14 @@ export function renderTimeEntryList(taskDocId: string, taskTitle: string, entrie
   const rows = entries.map((e: any) => {
     const dur = durationInMinutes(e);
     const running = !e.stoppedAt;
+    const comment = e.comment ? esc(e.comment) : '';
     return `<tr>
       <td>${formatDateTime(e.startedAt)}</td>
       <td>${running ? '<span class="badge state--running">running</span>' : formatDateTime(e.stoppedAt)}</td>
       <td>${running ? '—' : formatDuration(dur)}</td>
+      <td style="max-width:200px;word-break:break-word">${comment}</td>
       <td style="white-space:nowrap">${!running ? `<button type="button" class="btn-icon" title="Edit"
-        onclick="(function(btn){var f=btn.closest('.task-edit').querySelector('form[data-time-form]');if(!f)return;f.setAttribute('hx-put','/api/time-entries/${esc(e.documentId)}');f.removeAttribute('hx-post');htmx.process(f);function toLocal(iso){var d=new Date(iso);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16)};f.querySelector('[name=startedAt]').value=toLocal('${esc(e.startedAt)}');f.querySelector('[name=stoppedAt]').value=toLocal('${esc(e.stoppedAt)}');var durF=f.querySelector('[name=duration]');if(durF){durF.value=${durationInMinutes(e)}};f.querySelector('[data-form-label]').textContent='Edit Entry';var sb=f.querySelector('[data-submit-btn]');sb.textContent='Update';var existing=f.querySelector('[data-cancel-edit]');if(existing)existing.remove();var cb=document.createElement('button');cb.type='button';cb.className='btn-ghost';cb.textContent='Cancel Edit';cb.style.color='var(--danger)';cb.setAttribute('data-cancel-edit','');cb.onclick=function(){f.setAttribute('hx-post','/api/time-entries');f.removeAttribute('hx-put');htmx.process(f);var now=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);f.querySelector('[name=startedAt]').value=now;f.querySelector('[name=stoppedAt]').value=now;var durC=f.querySelector('[name=duration]');if(durC)durC.value='';f.querySelector('[data-form-label]').textContent='New Entry';sb.textContent='Add';cb.remove()};sb.after(cb)})(this)">✎</button>
+        onclick="(function(btn){var f=btn.closest('.task-edit').querySelector('form[data-time-form]');if(!f)return;f.setAttribute('hx-put','/api/time-entries/${esc(e.documentId)}');f.removeAttribute('hx-post');htmx.process(f);function toLocal(iso){var d=new Date(iso);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16)};f.querySelector('[name=startedAt]').value=toLocal('${esc(e.startedAt)}');f.querySelector('[name=stoppedAt]').value=toLocal('${esc(e.stoppedAt)}');var comF=f.querySelector('[name=comment]');if(comF)comF.value=${JSON.stringify(e.comment || '')};f.querySelector('[data-form-label]').textContent='Edit Entry';var sb=f.querySelector('[data-submit-btn]');sb.textContent='Update';var existing=f.querySelector('[data-cancel-edit]');if(existing)existing.remove();var cb=document.createElement('button');cb.type='button';cb.className='btn-ghost';cb.textContent='Cancel Edit';cb.style.color='var(--danger)';cb.setAttribute('data-cancel-edit','');cb.onclick=function(){f.setAttribute('hx-post','/api/time-entries');f.removeAttribute('hx-put');htmx.process(f);var now=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);f.querySelector('[name=startedAt]').value=now;f.querySelector('[name=stoppedAt]').value=now;var comC=f.querySelector('[name=comment]');if(comC)comC.value='';f.querySelector('[data-form-label]').textContent='New Entry';sb.textContent='Add';cb.remove()};sb.after(cb)})(this)">✎</button>
         <button type="button" class="btn-icon btn-delete" title="Delete"
         hx-delete="/api/time-entries/${esc(e.documentId)}" hx-swap="none"
         hx-confirm="Delete this time entry?"
@@ -78,9 +80,9 @@ export function renderTimeEntryList(taskDocId: string, taskTitle: string, entrie
 
   return `<div id="time-entry-list">
   ${entries.length ? `<table class="time-entry-table">
-    <thead><tr><th>Started</th><th>Stopped</th><th>Duration</th><th></th></tr></thead>
+    <thead><tr><th>Started</th><th>Stopped</th><th>Duration</th><th>Comment</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
-    <tfoot><tr><td colspan="2"><strong>Total</strong></td><td><strong>${formatDuration(totalMinutes)}</strong></td><td></td></tr></tfoot>
+    <tfoot><tr><td colspan="2"><strong>Total</strong></td><td><strong>${formatDuration(totalMinutes)}</strong></td><td colspan="2"></td></tr></tfoot>
   </table>` : '<p class="form-hint">No time entries yet.</p>'}
 </div>`;
 }
