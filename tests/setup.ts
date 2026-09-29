@@ -4,6 +4,7 @@
  * and attaches it to globalThis so every test file can reach it.
  */
 import { createStrapi, compileStrapi } from '@strapi/strapi';
+import request from 'supertest';
 
 const TEST_APP_DIR = __dirname + '/..';
 
@@ -31,15 +32,13 @@ export default async function setup() {
   // Each test file that needs the Owner JWT reads from here instead of
   // calling /api/auth/local again — avoids rate-limit 429s when 6+
   // files all try to login during their beforeAll in the same second.
-  const loginRes = await fetch(`http://localhost:1337/api/auth/local`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const loginRes = await request(app.server.httpServer)
+    .post('/api/auth/local')
+    .send({
       identifier: process.env.DAILYFLOW_OWNER_EMAIL,
       password: process.env.DAILYFLOW_OWNER_PASSWORD,
-    }),
-  });
-  const loginJson = await loginRes.json() as any;
+    });
+  const loginJson = loginRes.body as any;
   (globalThis as any).jwtCache = {
     [process.env.DAILYFLOW_OWNER_EMAIL!]: loginJson.jwt,
   };

@@ -11,6 +11,7 @@ import { renderTaskCard, renderTaskCards } from '../../../renderers/task';
 import {
   getRoleType,
   getUserId,
+  hasSameId,
   mergeFilters,
   stripEmptyFilters,
   canAccessProject,
@@ -19,6 +20,7 @@ import {
   getGroupProjectIds,
   getMemberProjectIds,
   getManagedEmployeeIds,
+  getTaskAccess,
   ROLE_OWNER,
   ROLE_TEAM_LEAD,
   ROLE_EMPLOYEE,
@@ -324,10 +326,23 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
 
   async update(ctx) {
     const { id } = ctx.params;
-    const projectDocId = await getTaskProjectDocId(strapi, id);
-    if (!(await canAccessProject(strapi, ctx, projectDocId || ''))) {
+    const { task: accessTask, allowed } = await getTaskAccess(strapi, ctx, id);
+    const role = getRoleType(ctx);
+    const userId = getUserId(ctx);
+
+    // Project membership lets Employees see the work in their projects, but
+    // editing is deliberately narrower: an Employee may only update the task
+    // explicitly assigned to their authenticated account.  Read the relation
+    // from the persisted task, never from the request body.
+    const employeeIsAssignee =
+      role === ROLE_EMPLOYEE &&
+      hasSameId(accessTask?.assigned_to, userId);
+
+    if (!accessTask || !allowed || (role === ROLE_EMPLOYEE && !employeeIsAssignee)) {
       return ctx.forbidden('You do not have access to this task.');
     }
+
+    const projectDocId = accessTask.project?.documentId ?? null;
 
     const updateData = toData(ctx.request.body);
     if (updateData.title) updateData.title = toTitleCase(String(updateData.title).trim());
