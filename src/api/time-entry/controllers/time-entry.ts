@@ -14,6 +14,7 @@ import {
 	getUserId,
 	mergeFilters,
 	getTaskAccess,
+	canAccessProject,
 	getOwnedProjectIds,
 	getMemberProjectIds,
 	ROLE_TEAM_LEAD,
