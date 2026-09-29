@@ -2,8 +2,8 @@
  * time-entry controller
  *
  * Time entries have no owner/team field of their own — visibility and
- * write-access are scoped transitively via the parent task's project
- * (see ../../../utils/access.ts), rather than filtered directly.
+ * write-access are scoped through the parent task: project membership or an
+ * assignment to that exact task (see ../../../utils/access.ts).
  */
 
 import { factories } from '@strapi/strapi';
@@ -13,10 +13,9 @@ import {
 	getRoleType,
 	getUserId,
 	mergeFilters,
-	canAccessProject,
+	getTaskAccess,
 	getOwnedProjectIds,
 	getMemberProjectIds,
-	getAssignedProjectIds,
 	ROLE_TEAM_LEAD,
 	ROLE_EMPLOYEE,
 } from '../../../utils/access';
@@ -52,8 +51,8 @@ async function fetchWithProject(strapi: any, documentId: string) {
 	});
 }
 
-function projectDocIdOf(entry: any): string | null {
-	return entry?.task?.project?.documentId ?? null;
+function taskDocIdOf(entry: any): string | null {
+	return entry?.task?.documentId ?? null;
 }
 
 export default factories.createCoreController('api::time-entry.time-entry', ({ strapi }) => ({
@@ -70,9 +69,18 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 		if ((role === ROLE_TEAM_LEAD || role === ROLE_EMPLOYEE) && userId) {
 			const ownedIds = await getOwnedProjectIds(strapi, userId);
 			const groupIds = await getMemberProjectIds(strapi, userId);
-			const assignedIds = await getAssignedProjectIds(strapi, userId);
-			const allIds = [...new Set([...ownedIds, ...groupIds, ...assignedIds])];
-			mergeFilters(ctx, { task: { project: { id: { $in: allIds } } } });
+			const assignedTaskIds = (await strapi.db.query('api::task.task').findMany({
+				where: { assigned_to: userId, publishedAt: { $ne: null } },
+				select: ['id'],
+			})).map((task: any) => task.id);
+			const projectIds = [...new Set([...ownedIds, ...groupIds])];
+			mergeFilters(ctx, assignedTaskIds.length
+				? { $or: [
+					{ task: { project: { id: { $in: projectIds } } } },
+					{ task: { id: { $in: assignedTaskIds } } },
+				] }
+				: { task: { project: { id: { $in: projectIds } } } },
+			);
 		}
 
 		const res = await super.find(ctx);
@@ -82,17 +90,19 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 	},
 
 	async findOne(ctx) {
-		// findOne() targets one time entry by id — checked directly against
-		// its task's project instead of adding a query filter, avoiding the
-		// restricted-relation problem described in find() above.
+		// findOne() targets one time entry by id, so verify its exact parent
+		// task rather than inferring access from every task in that project.
 		const { id } = ctx.params;
 		const role = getRoleType(ctx);
 		const userId = getUserId(ctx);
 		if (role === ROLE_TEAM_LEAD || role === ROLE_EMPLOYEE) {
 			if (!userId) return ctx.notFound();
 			const existing = await fetchWithProject(strapi, id);
-			const projectDocId = projectDocIdOf(existing);
-			if (!projectDocId || !(await canAccessProject(strapi, ctx, projectDocId))) {
+			const taskDocId = taskDocIdOf(existing);
+			const { allowed } = taskDocId
+				? await getTaskAccess(strapi, ctx, taskDocId)
+				: { allowed: false };
+			if (!allowed) {
 				return ctx.notFound();
 			}
 		}
@@ -114,9 +124,9 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 		const taskDocId = typeof data.task === 'string' ? data.task : null;
 		if (!taskDocId) return ctx.badRequest('A task is required.');
 
-		const task = await strapi.documents('api::task.task').findOne({ documentId: taskDocId, populate: { project: true } });
-		const projectDocId = (task as any)?.project?.documentId ?? null;
-		if (!projectDocId || !(await canAccessProject(strapi, ctx, projectDocId))) {
+		const { task, allowed } = await getTaskAccess(strapi, ctx, taskDocId);
+		if (!task) return ctx.notFound('Task not found.');
+		if (!allowed) {
 			return ctx.forbidden('You do not have access to this task.');
 		}
 
@@ -130,8 +140,11 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 		const { id } = ctx.params;
 		const existing = await fetchWithProject(strapi, id);
 		if (!existing) return ctx.notFound('Time entry not found');
-		const projectDocId = projectDocIdOf(existing);
-		if (!(await canAccessProject(strapi, ctx, projectDocId || ''))) {
+		const taskDocId = taskDocIdOf(existing);
+		const { allowed } = taskDocId
+			? await getTaskAccess(strapi, ctx, taskDocId)
+			: { allowed: false };
+		if (!allowed) {
 			return ctx.forbidden('You do not have access to this time entry.');
 		}
 
@@ -150,8 +163,11 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 		const { id } = ctx.params;
 		const existing = await fetchWithProject(strapi, id);
 		if (!existing) return ctx.notFound('Time entry not found');
-		const projectDocId = projectDocIdOf(existing);
-		if (!(await canAccessProject(strapi, ctx, projectDocId || ''))) {
+		const taskDocId = taskDocIdOf(existing);
+		const { allowed } = taskDocId
+			? await getTaskAccess(strapi, ctx, taskDocId)
+			: { allowed: false };
+		if (!allowed) {
 			return ctx.forbidden('You do not have access to this time entry.');
 		}
 
@@ -163,13 +179,9 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 
 	async byTask(ctx) {
 		const { taskDocId } = ctx.params;
-		const task = await strapi.documents('api::task.task').findOne({
-			documentId: taskDocId,
-			populate: { project: true },
-		});
+		const { task, allowed } = await getTaskAccess(strapi, ctx, taskDocId);
 		if (!task) return ctx.notFound();
-		const projectDocId = (task as any)?.project?.documentId ?? null;
-		if (!projectDocId || !(await canAccessProject(strapi, ctx, projectDocId))) {
+		if (!allowed) {
 			return ctx.forbidden();
 		}
 
@@ -187,8 +199,11 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 		const { id } = ctx.params;
 		const existing = await fetchWithProject(strapi, id);
 		if (!existing) return ctx.notFound('Time entry not found');
-		const projectDocId = projectDocIdOf(existing);
-		if (!(await canAccessProject(strapi, ctx, projectDocId || ''))) {
+		const taskDocId = taskDocIdOf(existing);
+		const { allowed } = taskDocId
+			? await getTaskAccess(strapi, ctx, taskDocId)
+			: { allowed: false };
+		if (!allowed) {
 			return ctx.forbidden('You do not have access to this time entry.');
 		}
 

@@ -89,6 +89,54 @@ export async function canAccessProject(strapi: any, ctx: any, projectDocId: stri
   return false;
 }
 
+export type TaskAccess = {
+  task: any | null;
+  allowed: boolean;
+};
+
+/**
+ * Resolve a published task and decide whether the current caller may work on
+ * it. Task assignment is deliberately checked against this exact task before
+ * falling back to project access: the task list/homepage both expose directly
+ * assigned tasks even when the user is not a member of one of the project's
+ * groups.
+ *
+ * Keeping this lookup in the access layer gives callers enough information to
+ * distinguish an unknown task (404) from a known task outside the caller's
+ * scope (403), without trusting any user id supplied by a client.
+ */
+export async function getTaskAccess(strapi: any, ctx: any, taskDocId: string): Promise<TaskAccess> {
+  const task = await strapi.db.query('api::task.task').findOne({
+    where: { documentId: taskDocId, publishedAt: { $ne: null } },
+    populate: {
+      project: { select: ['id', 'documentId'] },
+      assigned_to: { select: ['id'] },
+    },
+  });
+  if (!task) return { task: null, allowed: false };
+
+  const role = getRoleType(ctx);
+  const userId = getUserId(ctx);
+  if (!userId) return { task, allowed: false };
+  if (role === ROLE_OWNER) return { task, allowed: true };
+
+  // Direct assignment grants access to the assigned task itself. This is
+  // intentionally evaluated from the loaded task, not from a client field or
+  // a project-wide inference.
+  if (
+    (role === ROLE_TEAM_LEAD || role === ROLE_EMPLOYEE) &&
+    task.assigned_to?.id === userId
+  ) {
+    return { task, allowed: true };
+  }
+
+  const projectDocId = task.project?.documentId;
+  return {
+    task,
+    allowed: !!projectDocId && (await canAccessProject(strapi, ctx, projectDocId)),
+  };
+}
+
 export async function canManageProject(strapi: any, ctx: any, projectDocId: string): Promise<boolean> {
   const role = getRoleType(ctx);
   const userId = getUserId(ctx);
