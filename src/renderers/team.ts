@@ -1,4 +1,5 @@
 import { esc, toTitleCase, renderMultiSelect } from '../utils/html';
+import { ICON_TRASH } from '../utils/icons';
 
 export function renderResetPasswordForm(member: { id: number; username: string }): string {
   return `<div class="modal" id="reset-pw-modal-wrap" onclick="if(event.target===this)this.remove()">
@@ -40,7 +41,7 @@ export function renderTeamMemberRow(member: any, callerRole: string): string {
     ? `<button type="button" class="btn-icon btn-delete" title="Delete"
       hx-delete="/api/team/members/${member.id}" hx-swap="none"
       hx-confirm="Are you sure?"
-      @htmx:after-request="if($event.detail.successful){htmx.ajax('GET','/api/team/members',{target:'#team-members',swap:'innerHTML'})}">🗑</button>`
+      @htmx:after-request="if($event.detail.successful){htmx.ajax('GET','/api/team/members',{target:'#team-members',swap:'innerHTML'})}">${ICON_TRASH}</button>`
     : '';
   return `<div class="team-member-row">
   <div class="team-member-row__info">

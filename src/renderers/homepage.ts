@@ -1,4 +1,5 @@
 import { esc, toTitleCase } from '../utils/html';
+import { ICON_PIN } from '../utils/icons';
 
 function durationInMinutes(entry: any): number {
   const saved = Number(entry.duration);
@@ -157,7 +158,7 @@ export function renderHomepage(opts: {
       <section class="hp-project-group" data-project-id="${esc(project?.documentId ?? '')}">
         <h3 class="hp-project-group__name">
           <a class="hp-project-link" href="javascript:void(0)" onclick="window._openProject('${esc(project?.documentId ?? '')}','${esc(projectName)}',${ptasks.length})">${esc(projectName)}</a>
-          <button class="btn-icon btn-pin hp-section-pin" title="Pin project" onclick="window._pinProjectSection('${esc(project?.documentId ?? '')}',this)">📍</button>
+          <button class="btn-icon btn-pin hp-section-pin" title="Pin project" onclick="window._pinProjectSection('${esc(project?.documentId ?? '')}',this)">${ICON_PIN}</button>
         </h3>
         <div class="hp-project-group__count">${ptasks.length} task${ptasks.length !== 1 ? 's' : ''}</div>
         <div class="hp-tasks-table-wrap">
