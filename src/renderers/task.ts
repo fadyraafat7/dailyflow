@@ -1,4 +1,5 @@
 import { esc, renderView, toTitleCase } from "../utils/html";
+import { ICON_USER, ICON_PLAY, ICON_STOP } from "../utils/icons";
 
 function durationInMinutes(timeEntry: any): number {
   const hasSavedDuration =
@@ -54,7 +55,7 @@ export function renderTaskCard(task: any, role = ""): string {
     : "";
   const assignedUsername = task.assigned_to?.username;
   const assignedTo = assignedUsername
-    ? `<span class="badge state--active">👤 ${esc(assignedUsername)}</span>`
+    ? `<span class="badge state--active">${ICON_USER} ${esc(assignedUsername)}</span>`
     : "";
 
   let timeSummary: string;
@@ -74,11 +75,11 @@ window._stopTimerWithComment=window._stopTimerWithComment||function(eId,tId){var
 
   const timerControls = runningEntry
     ? `<button type="button" class="btn-icon" title="Stop timer"
-        onclick="window._stopTimerWithComment('${esc(runningEntry.documentId)}','${id}')">⏹</button>`
+        onclick="window._stopTimerWithComment('${esc(runningEntry.documentId)}','${id}')">${ICON_STOP}</button>`
     : `<button type="button" class="btn-icon" title="Start timer"
         hx-post="/api/time-entries"
         hx-swap="none"
-        hx-vals='js:{"task":"${id}","startedAt":new Date().toISOString()}'>▶</button>`;
+        hx-vals='js:{"task":"${id}","startedAt":new Date().toISOString()}'>${ICON_PLAY}</button>`;
 
   return renderView("task/card", {
     id,

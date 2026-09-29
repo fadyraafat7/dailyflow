@@ -1,4 +1,5 @@
 import { esc, toTitleCase, renderMultiSelect } from '../utils/html';
+import { ICON_PENCIL, ICON_TRASH } from '../utils/icons';
 
 export function renderGroupPage(groups: any[], callerRole: string): string {
 
@@ -50,13 +51,13 @@ export function renderGroupRow(group: any, callerRole: string): string {
 
   const editButton = canManage
     ? `<button type="button" class="btn-icon" title="Edit"
-        hx-get="/api/groups/${group.documentId}/edit-form" hx-target="#modal-container" hx-swap="innerHTML">✎</button>`
+        hx-get="/api/groups/${group.documentId}/edit-form" hx-target="#modal-container" hx-swap="innerHTML">${ICON_PENCIL}</button>`
     : '';
   const deleteButton = canManage
     ? `<button type="button" class="btn-icon btn-delete" title="Delete"
         hx-delete="/api/groups/${group.documentId}" hx-swap="none"
         hx-confirm="Are you sure?"
-        @htmx:after-request="if($event.detail.successful){htmx.ajax('GET','/api/groups/list',{target:'#group-list',swap:'innerHTML'})}">🗑</button>`
+        @htmx:after-request="if($event.detail.successful){htmx.ajax('GET','/api/groups/list',{target:'#group-list',swap:'innerHTML'})}">${ICON_TRASH}</button>`
     : '';
 
   return `<div class="group-row" id="group-${esc(group.documentId)}">
