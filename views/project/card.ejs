@@ -5,6 +5,8 @@
     <h3 class="project-card__name"><%= name %></h3>
     <span class="badge state--<%= state %>"><%= state %></span>
     <span class="badge badge--count"><%= count %> <%= taskLabel %></span>
+    <button type="button" class="btn-icon btn-pin" title="Pin project"
+        onclick="window._pinProject('<%= id %>', this)" @click.stop>📍</button>
     <button type="button" class="btn-icon" title="Edit project" x-show="can('project.update')"
         hx-get="/api/projects/<%= id %>/edit-form" hx-target="#modal-container" hx-swap="innerHTML"
         @click.stop>✎</button>

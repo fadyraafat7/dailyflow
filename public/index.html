@@ -6,7 +6,7 @@
     <title>DailyFlow</title>
     <script src="/htmx.min.js"></script>
     <script defer src="/alpine.min.js"></script>
-    <link rel="stylesheet" href="/app.css" />
+    <link rel="stylesheet" href="/app.css?v=3" />
 </head>
 <body x-data="{
         selected: null,
@@ -23,6 +23,7 @@
         authUser: null,
         perms: [],
         accountModalOpen: false,
+        currentView: 'home',
         showToast(msg) {
             this.toast = msg;
             clearTimeout(this._toastTimer);
@@ -30,11 +31,20 @@
         },
         can(p) { return this.perms.includes(p); },
         isManager() { const t = this.authUser?.role?.type; return t === 'owner' || t === 'team_lead'; },
+        navigate(view) {
+            this.currentView = view;
+            if (view === 'home') {
+                this.$nextTick(() => this.$dispatch('load-homepage'));
+            } else if (view === 'projects') {
+                this.$nextTick(() => { this.$dispatch('load-projects'); this.$dispatch('load-tasks'); });
+            }
+        },
         logout() {
             this.authToken = null;
             this.authUser = null;
             this.perms = [];
             this.selected = null;
+            this.currentView = 'home';
             localStorage.removeItem('dailyflow_token');
         },
         closeProjectModal() {
@@ -48,12 +58,12 @@
         }
     }"
       :hx-headers="JSON.stringify(authToken ? { Authorization: 'Bearer ' + authToken } : {})"
-      @auth-login.window="authToken = $event.detail.jwt; authUser = $event.detail.user; perms = $event.detail.perms; localStorage.setItem('dailyflow_token', $event.detail.jwt); $dispatch('load-projects')"
-      @auth-session.window="authUser = $event.detail.user; perms = $event.detail.perms; $dispatch('load-projects')"
+      @auth-login.window="authToken = $event.detail.jwt; authUser = $event.detail.user; perms = $event.detail.perms; localStorage.setItem('dailyflow_token', $event.detail.jwt); currentView = 'home'; $nextTick(() => $dispatch('load-homepage'))"
+      @auth-session.window="authUser = $event.detail.user; perms = $event.detail.perms; $nextTick(() => $dispatch('load-homepage'))"
       @auth-password-changed.window="authToken = $event.detail.jwt; localStorage.setItem('dailyflow_token', $event.detail.jwt); accountModalOpen = false; showToast('Password changed.')"
       @open-edit="editing = $event.detail"
       @open-time-entry="timeEntryTask = $event.detail; timeEntryModalOpen = true"
-      @refresh-tasks="if(selected) $dispatch('load-tasks')"
+      @refresh-tasks="if(currentView==='projects') $dispatch('load-tasks'); else $dispatch('load-homepage')"
       @refresh-projects="$dispatch('load-projects')"
       @htmx:before-swap.window="if($event.detail.xhr.status===204){$event.detail.shouldSwap=true;$event.detail.isError=false}"
       @htmx:after-settle.window="Alpine.initTree($event.detail.target)"
@@ -104,9 +114,11 @@
                 </div>
                 <div>
                     <h1>DailyFlow</h1>
-                    <p class="subtitle">
-                        Strapi returns HTML · HTMX handles requests · Alpine handles UI state
-                    </p>
+                    <!-- View tabs -->
+                    <nav class="view-tabs">
+                        <button type="button" class="view-tab" :class="{ 'is-active': currentView === 'home' }" @click="navigate('home')">🏠 الرئيسية</button>
+                        <button type="button" class="view-tab" :class="{ 'is-active': currentView === 'projects' }" @click="navigate('projects')">📁 المشاريع</button>
+                    </nav>
                 </div>
                 <div class="header-user">
                     <span x-text="authUser?.username"></span>
@@ -117,65 +129,77 @@
                     <button type="button" class="btn-ghost" @click="logout()">Log out</button>
                 </div>
             </header>
-            <div class="layout">
-                <aside class="panel">
-                    <div class="section-head section-head--projects">
-                        <h2>Projects</h2>
-                        <button type="button" class="btn-icon" x-show="can('project.create')" @click="projectForm = { name: '', description: '', state: 'active' }; projectModalOpen = true" title="Add project">＋</button>
-                    </div>
-                    <form id="project-filters" class="project-toolbar"
-                          hx-get="/api/projects" hx-target="#projects" hx-swap="innerHTML"
-                          hx-trigger="load-projects from:body, input changed delay:400ms from:find input, change from:find select">
-                        <input type="search" name="filters[name][$containsi]" class="form-control project-toolbar__search" placeholder="Search projects…" />
-                        <select name="filters[state][$eq]" class="form-select">
-                            <option value="">All states</option>
-                            <option value="active">Active</option>
-                            <option value="archived">Archived</option>
-                        </select>
-                    </form>
-                    <div id="projects" class="project-list">
-                        Loading projects...
-                    </div>
-                </aside>
-                <main class="panel">
-                    <p x-show="!selected" class="empty placeholder">
-                        ← Select a project to see its tasks.
-                    </p>
-                    <div x-show="selected" x-cloak>
-                        <header class="detail__head">
-                            <div>
-                                <h2 class="detail__title" x-text="selected?.name"></h2>
-                                <span class="badge" x-text="(selected?.count || 0) + ' tasks'"></span>
-                            </div>
-                            <button type="button" class="btn-icon" @click="addModalOpen = true; newTaskProjectName = selected ? selected.name : ''" title="Add task">➕</button>
-                        </header>
-                        <form id="task-filters" x-ref="taskForm" class="task-toolbar"
-                              hx-get="/api/tasks" hx-target="#tasks" hx-swap="innerHTML"
-                              hx-trigger="load-tasks from:body, input changed delay:400ms from:find input, change from:find select">
-                            <input type="hidden" name="filters[project][documentId][$eq]" :value="selected?.id" />
-                            <input type="search" name="filters[title][$containsi]" class="form-control task-toolbar__search" placeholder="Search tasks…" />
-                            <select name="filters[priority][$eq]" class="form-select">
-                                <option value="">All priorities</option>
-                                <option value="low">Low priority</option>
-                                <option value="high">High priority</option>
-                            </select>
+
+            <!-- ═══ HOME VIEW ═══ -->
+            <div x-show="currentView === 'home'" x-cloak>
+                <div id="homepage"
+                     hx-get="/api/homepage"
+                     hx-trigger="load-homepage from:body"
+                     hx-swap="innerHTML"
+                     class="homepage-wrap">
+                    <div class="hp-loading">جاري التحميل...</div>
+                </div>
+            </div>
+
+            <!-- ═══ PROJECTS / TASKS VIEW ═══ -->
+            <div x-show="currentView === 'projects'" x-cloak>
+                <div class="layout">
+                    <aside class="panel">
+                        <div class="section-head section-head--projects">
+                            <h2>Projects</h2>
+                            <button type="button" class="btn-icon" x-show="can('project.create')" @click="projectForm = { name: '', description: '', state: 'active' }; projectModalOpen = true" title="Add project">＋</button>
+                        </div>
+                        <form id="project-filters" class="project-toolbar"
+                              hx-get="/api/projects" hx-target="#projects" hx-swap="innerHTML"
+                              hx-trigger="load-projects from:body, input changed delay:400ms from:find input, change from:find select">
+                            <input type="search" name="filters[name][$containsi]" class="form-control project-toolbar__search" placeholder="Search projects…" />
                             <select name="filters[state][$eq]" class="form-select">
                                 <option value="">All states</option>
-                                <option value="pending">Pending</option>
                                 <option value="active">Active</option>
-                                <option value="paused">Paused</option>
-                                <option value="completed">Completed</option>
-                            </select>
-                            <select name="sort" class="form-select">
-                                <option value="createdAt:desc">Newest first</option>
-                                <option value="createdAt:asc">Oldest first</option>
-                                <option value="priority:desc">By priority</option>
-                                <option value="plannedDate:asc">By planned date</option>
+                                <option value="archived">Archived</option>
                             </select>
                         </form>
-                        <div id="tasks" class="task-list"></div>
-                    </div>
-                </main>
+                        <div id="projects" class="project-list">
+                            Loading projects...
+                        </div>
+                    </aside>
+                    <main class="panel">
+                        <div>
+                            <header class="detail__head">
+                                <div>
+                                    <h2 class="detail__title" x-text="selected ? selected.name : 'All Tasks'"></h2>
+                                    <span class="badge" x-show="selected" x-text="(selected?.count || 0) + ' tasks'"></span>
+                                </div>
+                                <button type="button" class="btn-icon" @click="addModalOpen = true; newTaskProjectName = selected ? selected.name : ''" title="Add task" x-show="can('task.create')">➕</button>
+                            </header>
+                            <form id="task-filters" x-ref="taskForm" class="task-toolbar"
+                                  hx-get="/api/tasks" hx-target="#tasks" hx-swap="innerHTML"
+                                  hx-trigger="load-tasks from:body, input changed delay:400ms from:find input, change from:find select">
+                                <input type="hidden" name="filters[project][documentId][$eq]" :value="selected?.id" />
+                                <input type="search" name="filters[title][$containsi]" class="form-control task-toolbar__search" placeholder="Search tasks…" />
+                                <select name="filters[priority][$eq]" class="form-select">
+                                    <option value="">All priorities</option>
+                                    <option value="low">Low priority</option>
+                                    <option value="high">High priority</option>
+                                </select>
+                                <select name="filters[state][$eq]" class="form-select">
+                                    <option value="">All states</option>
+                                    <option value="pending">Pending</option>
+                                    <option value="active">Active</option>
+                                    <option value="paused">Paused</option>
+                                    <option value="completed">Completed</option>
+                                </select>
+                                <select name="sort" class="form-select">
+                                    <option value="createdAt:desc">Newest first</option>
+                                    <option value="createdAt:asc">Oldest first</option>
+                                    <option value="priority:desc">By priority</option>
+                                    <option value="plannedDate:asc">By planned date</option>
+                                </select>
+                            </form>
+                            <div id="tasks" class="task-list"></div>
+                        </div>
+                    </main>
+                </div>
             </div>
         </div>
 
@@ -308,6 +332,7 @@
                         </div>
                         <input type="datetime-local" name="startedAt" class="form-control" required />
                         <input type="datetime-local" name="stoppedAt" class="form-control" required />
+                        <textarea name="comment" class="form-control" rows="2" placeholder="Comment (optional)" style="resize:vertical"></textarea>
                         <input type="hidden" name="task" :value="timeEntryTask?.id" />
                         <div class="task-edit__actions">
                             <button data-submit-btn type="submit">Add</button>

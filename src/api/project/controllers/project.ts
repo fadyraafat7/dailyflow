@@ -3,7 +3,7 @@
  */
 
 import { factories } from '@strapi/strapi';
-import { isHtmx, renderPaginationNav } from '../../../utils/html';
+import { isHtmx, renderPaginationNav, toTitleCase } from '../../../utils/html';
 import { renderProjectCards, renderProjectCreateForm, renderProjectEditForm } from '../../../renderers/project';
 import {
   getRoleType,
@@ -67,11 +67,12 @@ export default factories.createCoreController('api::project.project', ({ strapi 
       ]);
       mergeFilters(ctx, { id: { $in: [...new Set([...owned, ...groupProjects, ...assigned])] } });
     } else if (role === ROLE_EMPLOYEE && userId) {
-      const [groupProjects, assigned] = await Promise.all([
+      const [owned, groupProjects, assigned] = await Promise.all([
+        getOwnedProjectIds(strapi, userId),
         getGroupProjectIds(strapi, userId),
         getAssignedProjectIds(strapi, userId),
       ]);
-      mergeFilters(ctx, { id: { $in: [...new Set([...groupProjects, ...assigned])] } });
+      mergeFilters(ctx, { id: { $in: [...new Set([...owned, ...groupProjects, ...assigned])] } });
     }
 
     const incomingPagination = (ctx.query.pagination as object) || {};
@@ -101,8 +102,9 @@ export default factories.createCoreController('api::project.project', ({ strapi 
     if (role === ROLE_TEAM_LEAD && userId && !(await isProjectOwner(strapi, id, userId)) && !(await isProjectMember(strapi, id, userId))) {
       return ctx.notFound();
     }
-    if (role === ROLE_EMPLOYEE && userId && !(await isProjectMember(strapi, id, userId))) {
-      return ctx.notFound();
+    if (role === ROLE_EMPLOYEE && userId) {
+      const hasAccess = await isProjectOwner(strapi, id, userId) || await isProjectMember(strapi, id, userId);
+      if (!hasAccess) return ctx.notFound();
     }
     const res = await super.findOne(ctx);
     if (res?.data) await attachTeamRelations(strapi, res.data);
@@ -112,11 +114,9 @@ export default factories.createCoreController('api::project.project', ({ strapi 
   async create(ctx) {
     const role = getRoleType(ctx);
     const userId = getUserId(ctx);
-    if (role !== ROLE_OWNER && role !== ROLE_TEAM_LEAD) {
-      return ctx.forbidden('Only Team Leads and Owners can create projects.');
-    }
 
     const data = toData(ctx.request.body);
+    if (data.name) data.name = toTitleCase(String(data.name).trim());
     data.users_permissions_user = userId;
 
     const rawGroupIds = Array.isArray(data.groupIds) ? data.groupIds : data.groupIds ? [data.groupIds] : [];
@@ -155,6 +155,7 @@ export default factories.createCoreController('api::project.project', ({ strapi 
     }
 
     const data = toData(ctx.request.body);
+    if (data.name) data.name = toTitleCase(String(data.name).trim());
     const hasGroupField = data._has_groupIds === '1' || data._has_groupIds === 1;
     const rawGroupIds = Array.isArray(data.groupIds) ? data.groupIds : data.groupIds ? [data.groupIds] : [];
     const groupIds = rawGroupIds.map(Number).filter((id: number) => Number.isInteger(id) && id > 0);
@@ -211,9 +212,7 @@ export default factories.createCoreController('api::project.project', ({ strapi 
    */
   async createForm(ctx) {
     const role = getRoleType(ctx);
-    if (role !== ROLE_OWNER && role !== ROLE_TEAM_LEAD) {
-      return ctx.forbidden();
-    }
+    if (!role) return ctx.forbidden();
     const allGroups = await strapi.db.query('api::group.group').findMany({
       where: { publishedAt: { $ne: null } },
       select: ['id', 'name'],
@@ -225,9 +224,7 @@ export default factories.createCoreController('api::project.project', ({ strapi 
 
   async groupCheckboxes(ctx) {
     const role = getRoleType(ctx);
-    if (role !== ROLE_OWNER && role !== ROLE_TEAM_LEAD) {
-      return ctx.forbidden();
-    }
+    if (!role) return ctx.forbidden();
     const allGroups = await strapi.db.query('api::group.group').findMany({
       where: { publishedAt: { $ne: null } },
       select: ['id', 'name'],
@@ -235,10 +232,8 @@ export default factories.createCoreController('api::project.project', ({ strapi 
     });
     const { esc } = require('../../../utils/html');
     const html = allGroups.length
-      ? allGroups.map((g: any) =>
-        `<label><input type="checkbox" name="groupIds" value="${g.id}" /> ${esc(g.name)}</label>`
-      ).join('\n')
-      : '<p class="form-hint">No groups available.</p>';
+      ? allGroups.map((g: any) => `<option value="${g.id}">${esc(g.name)}</option>`).join('\n')
+      : '<option disabled>No groups available.</option>';
     ctx.type = 'html';
     ctx.body = html;
   },

@@ -1,6 +1,7 @@
 <article class="task-card" id="task-<%= id %>" data-id="<%= id %>" data-title="<%= title %>" data-priority="<%= priority %>" data-state="<%= state %>" data-planned-date="<%= plannedDateRaw %>" data-assigned-to="<%= assignedToId %>">
   <div>
     <h4 class="task-card__title"><%= title %></h4>
+    <%- projectLink %>
     <div class="task-card__meta">
       <span class="badge priority--<%= priority %>"><%= priority %></span>
       <span class="badge state--<%= state %>"><%= state %></span>
@@ -12,6 +13,8 @@
   </div>
   <div class="task-card__actions">
     <%- timerControls %>
+    <button type="button" class="btn-icon btn-pin" title="Pin task"
+      onclick="window._pinTask('<%= id %>', this)">📍</button>
     <button type="button" class="btn-icon" title="Track time"
       @click="$dispatch('open-time-entry', { id: $el.closest('.task-card').dataset.id, title: $el.closest('.task-card').dataset.title })">⏱</button>
     <button type="button" class="btn-icon" title="Edit" x-show="can('task.update')"

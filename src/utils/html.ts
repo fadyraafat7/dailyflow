@@ -1,3 +1,28 @@
+/**
+ * Custom multi-select dropdown using checkboxes.
+ * Renders a button that opens a panel with checkboxes — no Ctrl+Click needed.
+ */
+export function renderMultiSelect(
+  name: string,
+  options: { value: string | number; label: string; selected?: boolean }[],
+  placeholder = 'Select...',
+): string {
+  const selectedCount = options.filter((o) => o.selected).length;
+  const labelText = selectedCount ? `${selectedCount} selected` : placeholder;
+
+  const checkboxes = options.map((o) =>
+    `<label class="ms__opt"><input type="checkbox" name="${esc(name)}" value="${esc(String(o.value))}"${o.selected ? ' checked' : ''} onchange="msCbChange(this)"><span>${esc(o.label)}</span></label>`
+  ).join('');
+
+  return `<div class="ms" data-ms-name="${esc(name)}"><button type="button" class="ms__trigger form-select" onclick="msToggle(this)" data-placeholder="${esc(placeholder)}"><span class="ms__label">${esc(labelText)}</span><span class="ms__arrow">▾</span></button><div class="ms__panel" hidden>${checkboxes || `<span class="ms__empty">No options available</span>`}</div></div>`;
+}
+
+/** Capitalize the first letter of every word. */
+export function toTitleCase(s: string): string {
+  if (!s) return s;
+  return s.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 /** Escape a value before putting it inside HTML (prevents XSS). */
 export function esc(v: unknown): string {
   if (v === null || v === undefined) return "";

@@ -16,6 +16,7 @@ import {
 	canAccessProject,
 	getOwnedProjectIds,
 	getMemberProjectIds,
+	getAssignedProjectIds,
 	ROLE_TEAM_LEAD,
 	ROLE_EMPLOYEE,
 } from '../../../utils/access';
@@ -66,10 +67,12 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 		// instead.
 		const role = getRoleType(ctx);
 		const userId = getUserId(ctx);
-		if (role === ROLE_TEAM_LEAD && userId) {
-			mergeFilters(ctx, { task: { project: { id: { $in: await getOwnedProjectIds(strapi, userId) } } } });
-		} else if (role === ROLE_EMPLOYEE && userId) {
-			mergeFilters(ctx, { task: { project: { id: { $in: await getMemberProjectIds(strapi, userId) } } } });
+		if ((role === ROLE_TEAM_LEAD || role === ROLE_EMPLOYEE) && userId) {
+			const ownedIds = await getOwnedProjectIds(strapi, userId);
+			const groupIds = await getMemberProjectIds(strapi, userId);
+			const assignedIds = await getAssignedProjectIds(strapi, userId);
+			const allIds = [...new Set([...ownedIds, ...groupIds, ...assignedIds])];
+			mergeFilters(ctx, { task: { project: { id: { $in: allIds } } } });
 		}
 
 		const res = await super.find(ctx);
@@ -199,9 +202,12 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 			}
 		}
 
+		const body = ctx.request.body?.data ?? ctx.request.body ?? {};
+		const comment = typeof body.comment === 'string' ? body.comment.trim() : undefined;
+
 		const updated = await strapi.documents('api::time-entry.time-entry').update({
 			documentId: id,
-			data: { stoppedAt, duration },
+			data: { stoppedAt, duration, ...(comment ? { comment } : {}) },
 			status: 'published',
 		});
 

@@ -6,7 +6,7 @@
  */
 
 import { factories } from '@strapi/strapi';
-import { isHtmx, esc, renderPaginationNav } from '../../../utils/html';
+import { isHtmx, esc, renderPaginationNav, toTitleCase } from '../../../utils/html';
 import { renderTaskCard, renderTaskCards } from '../../../renderers/task';
 import {
   getRoleType,
@@ -191,7 +191,7 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
     const incomingPagination = (ctx.query.pagination as object) || {};
     ctx.query = {
       ...ctx.query,
-      populate: { ...(ctx.query.populate as object), time_entries: true },
+      populate: { ...(ctx.query.populate as object), time_entries: true, project: true },
       pagination: { pageSize: DEFAULT_PAGE_SIZE, page: 1, ...incomingPagination },
     };
     const res = await super.find(ctx);
@@ -241,7 +241,7 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
 
     ctx.query = {
       ...ctx.query,
-      populate: { ...(ctx.query.populate as object), time_entries: true },
+      populate: { ...(ctx.query.populate as object), time_entries: true, project: true },
     };
     const res = await super.findOne(ctx);
     if (res?.data) await attachCreators(strapi, [res.data]);
@@ -252,6 +252,7 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
 
   async create(ctx) {
     const data = toData(ctx.request.body);
+    if (data.title) data.title = toTitleCase(String(data.title).trim());
     const projectDocId = typeof data.project === 'string' ? data.project : null;
 
     // Every task must belong to a project the caller is authorized for:
@@ -259,15 +260,11 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
     // they've been assigned to. A task with no project at all is only
     // allowed for Owner/Team Lead (matches the "Employees work within
     // assigned projects" model).
-    if (projectDocId) {
-      if (!(await canAccessProject(strapi, ctx, projectDocId))) {
-        return ctx.forbidden('You do not have access to this project.');
-      }
-    } else {
-      const role = getRoleType(ctx);
-      if (role !== ROLE_OWNER && role !== ROLE_TEAM_LEAD) {
-        return ctx.forbidden('Tasks must belong to a project you have access to.');
-      }
+    if (!projectDocId) {
+      return ctx.badRequest('Tasks must belong to a project.');
+    }
+    if (!(await canAccessProject(strapi, ctx, projectDocId))) {
+      return ctx.forbidden('You do not have access to this project.');
     }
 
     const isDuplicate = await findDuplicateTask(strapi, data.title, projectDocId);
@@ -333,6 +330,7 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
     }
 
     const updateData = toData(ctx.request.body);
+    if (updateData.title) updateData.title = toTitleCase(String(updateData.title).trim());
     const assignedToValue = updateData.assigned_to !== undefined
       ? (updateData.assigned_to ? Number(updateData.assigned_to) : null)
       : undefined;
@@ -366,11 +364,12 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
 
   async delete(ctx) {
     const { id } = ctx.params;
-    // Deletion is Owner/Team Lead only at the role-permission level
-    // already (Employees never reach this action) — this scopes a Team
-    // Lead to deleting tasks only within their own projects.
     const projectDocId = await getTaskProjectDocId(strapi, id);
-    if (!(await canManageProject(strapi, ctx, projectDocId || ''))) {
+    const role = getRoleType(ctx);
+    const hasAccess = role === ROLE_EMPLOYEE
+      ? await canAccessProject(strapi, ctx, projectDocId || '')
+      : await canManageProject(strapi, ctx, projectDocId || '');
+    if (!hasAccess) {
       return ctx.forbidden('You do not have access to this task.');
     }
 
@@ -402,41 +401,43 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
     if (!finalTitle) {
       return ctx.badRequest('Task title is required');
     }
+    if (!finalProjectName) {
+      return ctx.badRequest('Project name is required');
+    }
 
-    // 2) Find or create the project
+    // 2) Find or create the project — search only within projects the caller
+    // can access so a same-named project owned by someone else doesn't block
+    // them; if nothing is found in their scope, create a new one for them.
     let projectDocId: string | null = null;
 
     if (finalProjectName) {
-      const existing = await strapi.documents('api::project.project').findMany({
-        filters: { name: { $eqi: finalProjectName } },
-        limit: 1,
-      });
+      let existing: any[] = [];
+      if (role === ROLE_OWNER) {
+        existing = await strapi.documents('api::project.project').findMany({
+          filters: { name: { $eqi: finalProjectName } },
+          limit: 1,
+        });
+      } else {
+        const ownedIds = await getOwnedProjectIds(strapi, userId as number);
+        const groupIds = await getGroupProjectIds(strapi, userId as number);
+        const accessibleIds = [...new Set([...ownedIds, ...groupIds])];
+        if (accessibleIds.length) {
+          existing = await strapi.db.query('api::project.project').findMany({
+            where: { name: { $eqi: finalProjectName }, id: { $in: accessibleIds } },
+            limit: 1,
+          });
+        }
+      }
 
       if (existing.length > 0) {
         projectDocId = existing[0].documentId;
-      } else if (role === ROLE_OWNER || role === ROLE_TEAM_LEAD) {
-        // Only Owners/Team Leads can spin up a brand-new project this
-        // way — Employees don't create projects.
+      } else {
         const created = await strapi.documents('api::project.project').create({
           data: { name: finalProjectName, state: 'active', users_permissions_user: userId },
           status: 'published',
         });
         projectDocId = created.documentId;
-      } else {
-        if (!isHtmx(ctx)) {
-          return ctx.forbidden(`No project named "${finalProjectName}" is available to you — ask your Team Lead to create it and add you to it.`);
-        }
-        ctx.status = 403;
-        ctx.type = 'html';
-        ctx.body = `No project named "${esc(finalProjectName)}" is available to you — ask your Team Lead to create it and add you to it.`;
-        return;
       }
-    }
-
-    // 2b) Whether the project already existed or was just resolved, the
-    // caller still needs access to it.
-    if (projectDocId && !(await canAccessProject(strapi, ctx, projectDocId))) {
-      return ctx.forbidden('You do not have access to this project.');
     }
 
     // 3) Reject (don't create) if a task with this title already exists
@@ -509,6 +510,21 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
 
   async assignableUsers(ctx) {
     const role = getRoleType(ctx);
+    const userId = getUserId(ctx);
+
+    if (role === ROLE_EMPLOYEE) {
+      if (!userId) return ctx.forbidden();
+      const user = await strapi.db.query('plugin::users-permissions.user').findOne({
+        where: { id: userId },
+        select: ['id', 'username'],
+      });
+      ctx.type = 'html';
+      ctx.body = user
+        ? `<option value="">Unassigned</option><option value="${user.id}" selected>${esc(user.username)}</option>`
+        : `<option value="">Unassigned</option>`;
+      return;
+    }
+
     if (role !== ROLE_OWNER && role !== ROLE_TEAM_LEAD) {
       return ctx.forbidden();
     }
@@ -533,10 +549,16 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
       users = [...userMap.values()].sort((a, b) => a.username.localeCompare(b.username));
 
       if (role === ROLE_TEAM_LEAD) {
-        const userId = getUserId(ctx);
         const empIds = await getManagedEmployeeIds(strapi, userId as number);
-        const empSet = new Set(empIds);
+        const empSet = new Set([...empIds, userId as number]);
         users = users.filter((u) => empSet.has(u.id));
+        if (userId && !users.find((u) => u.id === userId)) {
+          const self = await strapi.db.query('plugin::users-permissions.user').findOne({
+            where: { id: userId },
+            select: ['id', 'username'],
+          });
+          if (self) users.push(self);
+        }
       }
     }
 

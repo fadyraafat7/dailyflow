@@ -20,6 +20,9 @@
     "duration": {
       "type": "integer"
     },
+    "comment": {
+      "type": "text"
+    },
     "task": {
       "type": "relation",
       "relation": "manyToOne",

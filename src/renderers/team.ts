@@ -1,4 +1,4 @@
-import { esc } from '../utils/html';
+import { esc, toTitleCase, renderMultiSelect } from '../utils/html';
 
 export function renderResetPasswordForm(member: { id: number; username: string }): string {
   return `<div class="modal" id="reset-pw-modal-wrap" onclick="if(event.target===this)this.remove()">
@@ -44,7 +44,7 @@ export function renderTeamMemberRow(member: any, callerRole: string): string {
     : '';
   return `<div class="team-member-row">
   <div class="team-member-row__info">
-    <span class="team-member-row__name">${esc(member.username)}</span>
+    <span class="team-member-row__name">${esc(toTitleCase(member.username || ''))}</span>
     <span class="team-member-row__email">${esc(member.email)}</span>
   </div>
   <div style="display:flex;align-items:center;gap:.5rem">
@@ -97,9 +97,7 @@ export function renderTeamCreateForm(callerRoleType: string, groups: any[] = [])
   const groupOptions = groups.length
     ? `<div>
         <label class="url-import__label">Groups</label>
-        <div class="checkbox-list">
-          ${groups.map((g: any) => `<label><input type="checkbox" name="groupIds" value="${g.id}" /> ${esc(g.name)}</label>`).join('')}
-        </div>
+        ${renderMultiSelect('groupIds', groups.map((g: any) => ({ value: g.id, label: g.name })), 'Select groups...')}
       </div>`
     : '';
 
@@ -134,10 +132,7 @@ export function renderTeamModal(members: any[], callerRoleType: string, projects
   const groupOptions = groups.length
     ? `<div>
         <label class="project-picker-label">Groups</label>
-        <div class="checkbox-list">
-          ${groups.map((g: any) => `<label><input type="checkbox" name="groupIds" value="${g.id}" /> ${esc(g.name)}</label>`).join('')}
-        </div>
-        <p class="form-hint">Select one or more groups.</p>
+        ${renderMultiSelect('groupIds', groups.map((g: any) => ({ value: g.id, label: g.name })), 'Select groups...')}
       </div>`
     : '<p class="form-hint">No groups available. Create groups first.</p>';
 
