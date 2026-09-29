@@ -35,9 +35,19 @@ export function renderSidebar(
   sidebarUsers: any[],
   userEntriesMap: Map<number, { task: any; entries: any[] }[]>,
 ): string {
-  let html = `<div class="hp-sidebar" id="hp-sidebar">
+  const recentSection = `
+  <div class="hp-sidebar" id="hp-recent-card">
+    <div class="hp-sidebar__header">
+      <h2 class="hp-sidebar__title">Recent Tasks</h2>
+    </div>
+    <div id="hp-recent-body"></div>
+  </div>`;
+
+  let html = `<div class="hp-sidebar-col" id="hp-sidebar">
+  ${recentSection}
+  <div class="hp-sidebar">
   <div class="hp-sidebar__header">
-    <h2 class="hp-sidebar__title">Do Today</h2>
+    <h2 class="hp-sidebar__title">Activities</h2>
     <span class="hp-sidebar__date">${esc(todayLabel())}</span>
   </div>
   <div class="hp-sidebar__list">`;
@@ -96,7 +106,7 @@ export function renderSidebar(
     html += `</div>`;
   }
 
-  html += `</div></div>`;
+  html += `</div></div></div>`;
   return html;
 }
 
@@ -113,6 +123,8 @@ function groupTasksByProject(tasks: any[]): Map<string, { project: any; tasks: a
 }
 
 function renderTaskRow(task: any, role: string): string {
+  const projDocId = esc(task.project?.documentId || '');
+  const projName = esc(toTitleCase(task.project?.name || ''));
   const docId = esc(task.documentId);
   const state = esc(task.state || 'pending');
   const priority = esc(task.priority || 'low');
@@ -142,16 +154,20 @@ function renderTaskRow(task: any, role: string): string {
       data-title="${esc(task.title || '')}"
       data-priority="${esc(task.priority || 'low')}"
       data-state="${esc(task.state || 'pending')}"
-      data-assigned-to="${esc(String(task.assigned_to?.id || ''))}">Edit</button>
+      data-assigned-to="${esc(String(task.assigned_to?.id || ''))}"
+      data-project-doc-id="${projDocId}"
+      data-project-name="${projName}">Edit</button>
     ${canDelete ? `<button type="button" class="btn-ghost btn-xs hp-btn-delete"
       onclick="window._hpDeleteTask('${docId}')">Delete</button>` : ''}`;
+
+  const trackCall = `window._hpTrackRecentTask({id:'${docId}',title:'${esc(task.title||'')}',projectDocId:'${projDocId}',projectName:'${projName}'})`;
 
   return `<tr class="hp-task-row"
     data-sort-task="${esc(task.title || '')}"
     data-sort-priority="${prioritySort}"
     data-sort-state="${stateSort}"
     data-sort-time="${totalMinutes}">
-    <td class="hp-task-row__title">${title}</td>
+    <td class="hp-task-row__title" style="cursor:pointer" onclick="${trackCall}">${title}</td>
     <td><span class="badge priority--${priority}">${priority}</span></td>
     <td><span class="badge state--${state}">${state}</span></td>
     <td>${timeHtml}</td>

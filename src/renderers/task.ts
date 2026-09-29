@@ -37,7 +37,7 @@ export function renderTaskCard(task: any, role = ""): string {
   const date = task.plannedDate
     ? `<span class="task-card__date">${esc(task.plannedDate)}</span>`
     : "";
-  const projectDocId = task.project?.documentId;
+  const projectDocId = task.project?.documentId ?? '';
   const projectName = task.project?.name ? toTitleCase(task.project.name) : '';
   const projectLink = projectDocId && projectName
     ? `<a href="#" class="task-card__project-link" data-project-id="${esc(projectDocId)}" data-project-name="${esc(projectName)}" onclick="event.preventDefault();(function(el){if(window.Alpine){var d=window.Alpine.$data(document.body);d.selected={id:el.dataset.projectId,name:el.dataset.projectName,count:0};if(d.navigate)d.navigate('tasks');location.hash='tasks';setTimeout(function(){document.body.dispatchEvent(new CustomEvent('load-tasks',{bubbles:true}));},80);}else{var c=Array.prototype.find.call(document.querySelectorAll('.project-card'),function(x){return x.dataset.id===el.dataset.projectId});if(c)c.click();}})(this)">${esc(projectName)}</a>`
@@ -75,7 +75,7 @@ window._stopTimerWithComment=window._stopTimerWithComment||function(eId,tId){var
 
   const timerControls = runningEntry
     ? `<button type="button" class="btn-icon" title="Stop timer"
-        onclick="window._stopTimerWithComment('${esc(runningEntry.documentId)}','${id}')">${ICON_STOP}</button>`
+        onclick="window._hpTrackTaskCard(this.closest('.task-card'));window._stopTimerWithComment('${esc(runningEntry.documentId)}','${id}')">${ICON_STOP}</button>`
     : `<button type="button" class="btn-icon" title="Start timer"
         hx-post="/api/time-entries"
         hx-swap="none"
@@ -84,6 +84,8 @@ window._stopTimerWithComment=window._stopTimerWithComment||function(eId,tId){var
   return renderView("task/card", {
     id,
     title: esc(toTitleCase(task.title || '')),
+    projectDocId: esc(projectDocId),
+    projectName: esc(projectName),
     priority: esc(task.priority),
     state: esc(task.state),
     date,
