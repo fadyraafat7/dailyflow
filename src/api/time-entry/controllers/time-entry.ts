@@ -124,9 +124,16 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 		const taskDocId = typeof data.task === 'string' ? data.task : null;
 		if (!taskDocId) return ctx.badRequest('A task is required.');
 
-		const { task, allowed } = await getTaskAccess(strapi, ctx, taskDocId);
-		if (!task) return ctx.notFound('Task not found.');
-		if (!allowed) {
+		const task = await strapi.documents('api::task.task').findOne({
+			documentId: taskDocId,
+			populate: { project: true, users_permissions_user: true, assigned_to: true },
+		});
+		const projectDocId = (task as any)?.project?.documentId ?? null;
+		const userId = getUserId(ctx);
+		const isCreator = (task as any)?.users_permissions_user?.id === userId;
+		const isAssigned = (task as any)?.assigned_to?.id === userId;
+		if (!isCreator && !isAssigned && !projectDocId) return ctx.forbidden('You do not have access to this task.');
+		if (!isCreator && !isAssigned && !(await canAccessProject(strapi, ctx, projectDocId))) {
 			return ctx.forbidden('You do not have access to this task.');
 		}
 
@@ -179,15 +186,22 @@ export default factories.createCoreController('api::time-entry.time-entry', ({ s
 
 	async byTask(ctx) {
 		const { taskDocId } = ctx.params;
-		const { task, allowed } = await getTaskAccess(strapi, ctx, taskDocId);
+		const userId = getUserId(ctx);
+		const task = await strapi.documents('api::task.task').findOne({
+			documentId: taskDocId,
+			populate: { project: true, users_permissions_user: true, assigned_to: true },
+		});
 		if (!task) return ctx.notFound();
-		if (!allowed) {
+		const projectDocId = (task as any)?.project?.documentId ?? null;
+		const isCreator = (task as any)?.users_permissions_user?.id === userId;
+		const isAssigned = (task as any)?.assigned_to?.id === userId;
+		if (!isCreator && !isAssigned && !projectDocId) return ctx.forbidden();
+		if (!isCreator && !isAssigned && !(await canAccessProject(strapi, ctx, projectDocId))) {
 			return ctx.forbidden();
 		}
 
 		const entries = await strapi.db.query('api::time-entry.time-entry').findMany({
 			where: { task: { documentId: taskDocId }, publishedAt: { $ne: null } },
-			orderBy: { startedAt: 'desc' },
 		});
 
 		ctx.type = 'html';

@@ -532,7 +532,13 @@ export default factories.createCoreController('api::task.task', ({ strapi }) => 
     const selected = ctx.query.selected ? Number(ctx.query.selected) : null;
 
     let users: any[] = [];
-    if (projectDocId) {
+    if (role === ROLE_OWNER) {
+      users = await strapi.db.query('plugin::users-permissions.user').findMany({
+        where: { blocked: { $ne: true } },
+        select: ['id', 'username'],
+        orderBy: { username: 'asc' },
+      });
+    } else if (projectDocId) {
       const groups = await strapi.db.query('api::group.group').findMany({
         where: {
           projects: { documentId: projectDocId },
