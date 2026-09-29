@@ -1,24 +1,34 @@
 /**
  * Overrides the users-permissions plugin's own `GET /api/users/me` action.
  *
- * The plugin's built-in `me` controller runs the response through Strapi's
- * content-API permission sanitizer (sanitizeQuery/sanitizeOutput), which
- * only keeps a populated relation (here: `?populate=role`) if the caller's
- * role has its OWN separate permission on the related content type
- * (plugin::users-permissions.role) — not just on `user.me` itself. Since
- * our custom roles (Owner/Team Lead/Employee, granted in src/index.ts)
- * only ever get the `user.me` permission, that sanitizer silently drops
- * `role` from the response with no error, which is what made the "Team"
- * button (gated on authUser.role.type) never appear, and the role badge
- * never show, in the frontend.
- *
- * Fixing this "properly" would mean granting a role permission on
- * plugin::users-permissions.role, which opens up more than we want
- * (Strapi's role content type is meant for the admin panel, not the
- * content API). Overriding `me` to answer directly is simpler and safer:
- * it always returns exactly the shape the frontend needs, with the
- * sensitive fields (password, tokens) stripped explicitly.
+ * Also injects a `permissions` array so the frontend can gate UI elements
+ * without duplicating the role→permission map client-side. The map lives
+ * here as the single source of truth; the frontend calls `can('x.y')` and
+ * checks against the set returned from this endpoint.
  */
+
+const UI_PERMS: Record<string, string[]> = {
+  owner: [
+    'project.create', 'project.update', 'project.delete',
+    'task.create', 'task.update', 'task.delete',
+    'time-entry.create', 'time-entry.update', 'time-entry.delete',
+    'team.view', 'team.createTeamLead', 'team.deleteTeamLead',
+    'team.createEmployee', 'team.deleteEmployee',
+    'team.resetTeamLeadPassword', 'team.resetEmployeePassword',
+  ],
+  team_lead: [
+    'project.create', 'project.update', 'project.delete',
+    'task.create', 'task.update', 'task.delete',
+    'time-entry.create', 'time-entry.update', 'time-entry.delete',
+    'team.view', 'team.createEmployee', 'team.deleteEmployee',
+    'team.resetEmployeePassword',
+  ],
+  employee: [
+    'task.create', 'task.update',
+    'time-entry.create', 'time-entry.update', 'time-entry.delete',
+  ],
+};
+
 export default (plugin: any) => {
   plugin.controllers.user.me = async (ctx: any) => {
     const authUser = ctx.state.user;
@@ -30,10 +40,12 @@ export default (plugin: any) => {
     });
     if (!user) return ctx.notFound();
 
+    const roleType: string = (user as any).role?.type ?? '';
     const { password, resetPasswordToken, confirmationToken, ...safeUser } = user as any;
     ctx.body = {
       ...safeUser,
       role: user.role ? { id: user.role.id, name: user.role.name, type: user.role.type } : null,
+      permissions: UI_PERMS[roleType] ?? [],
     };
   };
 
