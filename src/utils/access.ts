@@ -23,6 +23,16 @@ export function getUserId(ctx: any): number | null {
   return ctx.state?.user?.id ?? null;
 }
 
+/** Compare a relation object or scalar id without relying on its runtime type. */
+export function hasSameId(entityOrId: any, userId: any): boolean {
+  const entityId = entityOrId && typeof entityOrId === 'object'
+    ? entityOrId.id
+    : entityOrId;
+  return entityId !== null && entityId !== undefined &&
+    userId !== null && userId !== undefined &&
+    String(entityId) === String(userId);
+}
+
 export function mergeFilters(ctx: any, extra: any) {
   const existing = (ctx.query as any)?.filters;
   const combined = existing ? { $and: [existing, extra] } : extra;
@@ -125,7 +135,7 @@ export async function getTaskAccess(strapi: any, ctx: any, taskDocId: string): P
   // a project-wide inference.
   if (
     (role === ROLE_TEAM_LEAD || role === ROLE_EMPLOYEE) &&
-    task.assigned_to?.id === userId
+    hasSameId(task.assigned_to, userId)
   ) {
     return { task, allowed: true };
   }
