@@ -88,6 +88,20 @@ const ACTION_MAP: { uid: string; actions: Record<string, RoleType[]> }[] = [
     },
   },
   {
+    uid: 'api::group.group',
+    actions: {
+      // Group routes are custom HTML endpoints rather than the generated
+      // content-API CRUD routes. Grant the handlers declared in
+      // src/api/group/routes/group.ts to match the documented RBAC matrix.
+      modal: ['owner', 'team_lead'],
+      list: ['owner', 'team_lead'],
+      editForm: ['owner', 'team_lead'],
+      create: ['owner', 'team_lead'],
+      update: ['owner', 'team_lead'],
+      remove: ['owner', 'team_lead'],
+    },
+  },
+  {
     uid: 'plugin::users-permissions.user',
     actions: {
       // Just enough for the frontend to know who's logged in and show

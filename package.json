@@ -13,6 +13,8 @@
     "strapi": "strapi",
     "upgrade": "npx @strapi/upgrade latest",
     "upgrade:dry": "npx @strapi/upgrade latest --dry",
+    "seed:compile": "tsc --pretty false --incremental false",
+    "seed": "npm run seed:compile && node dist/src/seed/index.js",
     "test": "jest --forceExit",
     "test:watch": "jest --watch"
   },
@@ -35,6 +37,7 @@
     "@types/react-dom": "^18",
     "@types/supertest": "^7.2.1",
     "jest": "^30.5.2",
+    "sqlite3": "^6.0.1",
     "supertest": "^7.3.0",
     "ts-jest": "^29.4.14",
     "typescript": "^5"

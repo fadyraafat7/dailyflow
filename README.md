@@ -89,6 +89,35 @@ On first run with an empty database, set `DAILYFLOW_OWNER_EMAIL` and `DAILYFLOW_
 
 The Strapi admin panel is available at `http://localhost:1337/admin`.
 
+### Development demo data
+
+Populate a local development database with interconnected demo data:
+
+```bash
+npm run seed
+```
+
+The command compiles the TypeScript project, starts Strapi without opening an
+HTTP server, and creates or reuses 9 users, 4 groups, 6 projects, 42 tasks,
+and 18 time entries. It is blocked when `NODE_ENV=production`.
+
+On a fresh database, it provides these defaults to the existing bootstrap
+(unless `DAILYFLOW_OWNER_*` is already configured):
+
+```text
+owner@dailyflow.local / Owner123!
+lead1@dailyflow.local / Lead123!
+employee1@dailyflow.local / Employee123!
+```
+
+The seed is idempotent: users match by email, groups/projects by name, tasks
+by project plus title, and time entries by task plus start time. Existing demo
+records are reused rather than duplicated. An existing bootstrap Owner is
+preserved without changing its email or password; the seed also ensures the
+separate `owner@dailyflow.local` demo Owner exists with the documented demo
+password. No reset command is provided: the schemas have no seed marker, so
+deleting records by valid names could remove unrelated application data.
+
 ### Frontend
 
 ```bash

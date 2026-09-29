@@ -128,23 +128,20 @@ describe('Team — deleteMember', () => {
 });
 
 // ─── Groups ──────────────────────────────────────────────────────────────────
-// Group routes are custom HTMX endpoints. They return HTML and require
-// permissions to be explicitly granted in the bootstrap ACTION_MAP.
+// Group routes are custom HTMX endpoints with permissions explicitly
+// reconciled by the bootstrap ACTION_MAP.
 // Currently api::group.group is not in ACTION_MAP so all JSON calls → 403.
 
 describe('Groups — permissions', () => {
-  test('Group endpoints require permissions (currently return 403 for all roles)', async () => {
-    // This documents current behavior: group actions are not in ACTION_MAP
-    // in src/index.ts so no role has explicit permission to call them.
-    // To enable: add api::group.group actions to ACTION_MAP in src/index.ts.
+  test('Owner can create a group', async () => {
     const res = await authPost(ownerJwt, '/api/groups', {
       data: { name: 'Alpha Team' },
     });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
   });
 
-  test('Group list also returns 403 (no permission granted)', async () => {
+  test('Owner can list groups', async () => {
     const res = await authGet(ownerJwt, '/api/groups/list');
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
   });
 });
