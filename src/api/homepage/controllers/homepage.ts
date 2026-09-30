@@ -15,8 +15,7 @@ import {
   getUserId,
   getOwnedProjectIds,
   getGroupProjectIds,
-  getMemberProjectIds,
-  getManagedEmployeeIds,
+getManagedEmployeeIds,
   ROLE_OWNER,
   ROLE_TEAM_LEAD,
   ROLE_EMPLOYEE,
@@ -47,15 +46,7 @@ export default ({ strapi }: { strapi: any }) => ({
         ? { publishedAt: { $ne: null }, $or: [{ project: { id: { $in: projectIds } } }, { id: { $in: assignedIds } }] }
         : { publishedAt: { $ne: null }, project: { id: { $in: projectIds } } };
     } else if (role === ROLE_EMPLOYEE) {
-      const memberIds = await getMemberProjectIds(strapi, userId);
-      const assignedRows = await strapi.db.query('api::task.task').findMany({
-        where: { assigned_to: userId, publishedAt: { $ne: null } },
-        select: ['id'],
-      });
-      const assignedIds = assignedRows.map((r: any) => r.id);
-      taskWhere = assignedIds.length
-        ? { publishedAt: { $ne: null }, $or: [{ project: { id: { $in: memberIds } } }, { id: { $in: assignedIds } }] }
-        : { publishedAt: { $ne: null }, project: { id: { $in: memberIds } } };
+      taskWhere = { publishedAt: { $ne: null }, assigned_to: userId };
     }
 
     const tasks = await strapi.db.query('api::task.task').findMany({
@@ -185,8 +176,7 @@ export default ({ strapi }: { strapi: any }) => ({
       const projectIds = [...new Set([...ownedIds, ...groupIds])];
       taskWhere = { publishedAt: { $ne: null }, project: { id: { $in: projectIds } } };
     } else if (role === ROLE_EMPLOYEE) {
-      const memberIds = await getMemberProjectIds(strapi, userId);
-      taskWhere = { publishedAt: { $ne: null }, project: { id: { $in: memberIds } } };
+      taskWhere = { publishedAt: { $ne: null }, assigned_to: userId };
     }
 
     const tasks = await strapi.db.query('api::task.task').findMany({

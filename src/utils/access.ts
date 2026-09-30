@@ -65,12 +65,16 @@ export async function isProjectOwner(strapi: any, projectDocId: string, userId: 
 
 /** Is this user a member of the given project via groups? */
 export async function isProjectMember(strapi: any, projectDocId: string, userId: number): Promise<boolean> {
-  const projectGroupIds = await getGroupProjectIds(strapi, userId);
-  const project = await strapi.documents('api::project.project').findOne({
-    documentId: projectDocId,
+  const groups = await strapi.db.query('api::group.group').findMany({
+    where: {
+      projects: { documentId: projectDocId },
+      users_permissions_users: userId,
+      publishedAt: { $ne: null },
+    },
+    select: ['id'],
+    limit: 1,
   });
-  if (!project) return false;
-  return projectGroupIds.includes(project.id);
+  return groups.length > 0;
 }
 
 /**
@@ -152,7 +156,10 @@ export async function canManageProject(strapi: any, ctx: any, projectDocId: stri
   const userId = getUserId(ctx);
   if (!userId || !projectDocId) return false;
   if (role === ROLE_OWNER) return true;
-  if (role === ROLE_TEAM_LEAD || role === ROLE_EMPLOYEE) return isProjectOwner(strapi, projectDocId, userId);
+  if (role === ROLE_TEAM_LEAD || role === ROLE_EMPLOYEE) {
+    if (await isProjectOwner(strapi, projectDocId, userId)) return true;
+    if (await isProjectMember(strapi, projectDocId, userId)) return true;
+  }
   return false;
 }
 
